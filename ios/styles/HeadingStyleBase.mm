@@ -5,6 +5,18 @@
 
 @implementation HeadingStyleBase
 
+static BOOL EnrichedHeadingParagraphHasList(NSParagraphStyle *pStyle) {
+  for (NSTextList *textList in pStyle.textLists) {
+    NSString *markerFormat = textList.markerFormat;
+    if ([markerFormat hasPrefix:@"EnrichedUnorderedList"] ||
+        [markerFormat hasPrefix:@"EnrichedOrderedList"] ||
+        [markerFormat hasPrefix:@"EnrichedCheckbox"]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 // mock values since H1/2/3/4/5/6 style classes are used
 + (StyleType)getType {
   return None;
@@ -40,7 +52,18 @@
                 UIFont *font = (UIFont *)value;
                 if (font == nullptr)
                   return;
-                UIFont *newFont = [font setSize:[self getHeadingFontSize]];
+                CGFloat headingFontSize = [self getHeadingFontSize];
+                NSParagraphStyle *paragraphStyle =
+                    [self.host.textView.textStorage
+                         attribute:NSParagraphStyleAttributeName
+                           atIndex:subRange.location
+                    effectiveRange:nil];
+                if (EnrichedHeadingParagraphHasList(paragraphStyle)) {
+                  headingFontSize =
+                      MIN(headingFontSize,
+                          MAX([self.host.config h3FontSize], 20.0));
+                }
+                UIFont *newFont = [font setSize:headingFontSize];
                 if ([self isHeadingBold]) {
                   newFont = [newFont setBold];
                 }

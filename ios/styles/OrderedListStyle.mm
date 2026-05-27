@@ -4,6 +4,67 @@
 #import "StyleUtils.h"
 #import "TextInsertionUtils.h"
 
+static BOOL EnrichedListMarkerMatches(NSString *markerFormat,
+                                      NSString *baseValue) {
+  if (markerFormat == nullptr) {
+    return NO;
+  }
+
+  NSString *continuationBaseValue =
+      [baseValue stringByAppendingString:@"Continuation"];
+  return [markerFormat isEqualToString:baseValue] ||
+         [markerFormat hasPrefix:[baseValue stringByAppendingString:@":"]] ||
+         [markerFormat isEqualToString:continuationBaseValue] ||
+         [markerFormat
+             hasPrefix:[continuationBaseValue stringByAppendingString:@":"]];
+}
+
+static NSInteger EnrichedListLevelFromMarker(NSString *markerFormat,
+                                             NSString *baseValue) {
+  if (!EnrichedListMarkerMatches(markerFormat, baseValue)) {
+    return -1;
+  }
+
+  NSString *matchedBaseValue = baseValue;
+  NSString *continuationBaseValue =
+      [baseValue stringByAppendingString:@"Continuation"];
+  if ([markerFormat isEqualToString:continuationBaseValue] ||
+      [markerFormat
+          hasPrefix:[continuationBaseValue stringByAppendingString:@":"]]) {
+    matchedBaseValue = continuationBaseValue;
+  }
+
+  if ([markerFormat isEqualToString:matchedBaseValue]) {
+    return 0;
+  }
+  NSString *prefix = [matchedBaseValue stringByAppendingString:@":"];
+  NSString *levelString = [markerFormat substringFromIndex:prefix.length];
+  return MAX(0, [levelString integerValue]);
+}
+
+static NSInteger EnrichedListLevelInParagraph(NSParagraphStyle *pStyle,
+                                              NSString *baseValue) {
+  NSInteger level = 0;
+  for (NSTextList *textList in pStyle.textLists) {
+    NSInteger markerLevel =
+        EnrichedListLevelFromMarker(textList.markerFormat, baseValue);
+    if (markerLevel > level) {
+      level = markerLevel;
+    }
+  }
+  return level;
+}
+
+static BOOL EnrichedParagraphHasBlockQuote(NSParagraphStyle *pStyle) {
+  for (NSTextList *textList in pStyle.textLists) {
+    if (EnrichedListMarkerMatches(textList.markerFormat,
+                                  @"EnrichedBlockQuote")) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 @implementation OrderedListStyle
 
 + (StyleType)getType {
@@ -25,8 +86,8 @@
 - (void)applyStyling:(NSRange)range {
   // lists are drawn manually
   // margin before marker + gap between marker and paragraph
-  CGFloat listHeadIndent = [self.host.config orderedListMarginLeft] +
-                           [self.host.config orderedListGapWidth];
+  CGFloat baseMargin = [self.host.config orderedListMarginLeft];
+  CGFloat gapWidth = [self.host.config orderedListGapWidth];
 
   [self.host.textView.textStorage
       enumerateAttribute:NSParagraphStyleAttributeName
@@ -36,6 +97,15 @@
                            BOOL *_Nonnull stop) {
                 NSMutableParagraphStyle *pStyle =
                     [(NSParagraphStyle *)value mutableCopy];
+                NSInteger level =
+                    EnrichedListLevelInParagraph(pStyle, [self getValue]);
+                CGFloat blockquoteIndent =
+                    EnrichedParagraphHasBlockQuote(pStyle)
+                        ? [self.host.config blockquoteBorderWidth] +
+                              [self.host.config blockquoteGapWidth]
+                        : 0.0;
+                CGFloat listHeadIndent =
+                    baseMargin * (level + 1) + gapWidth + blockquoteIndent;
                 pStyle.headIndent = listHeadIndent;
                 pStyle.firstLineHeadIndent = listHeadIndent;
                 [self.host.textView.textStorage
@@ -43,6 +113,11 @@
                            value:pStyle
                            range:range];
               }];
+}
+
+- (BOOL)matchesParagraphMarker:(NSString *)markerFormat
+                          value:(NSString *)value {
+  return EnrichedListMarkerMatches(markerFormat, value);
 }
 
 - (BOOL)tryHandlingListShorcutInRange:(NSRange)range

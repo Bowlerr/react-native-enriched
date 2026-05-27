@@ -77,6 +77,33 @@ static void buffer_clear(buffer_t *b) {
   b->data[0] = '\0';
 }
 
+static bool is_ascii_whitespace(char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' ||
+         c == '\v';
+}
+
+static void buffer_trim_whitespace(buffer_t *b) {
+  if (!b || b->len == 0)
+    return;
+
+  size_t start = 0;
+  while (start < b->len && is_ascii_whitespace(b->data[start])) {
+    start++;
+  }
+
+  size_t end = b->len;
+  while (end > start && is_ascii_whitespace(b->data[end - 1])) {
+    end--;
+  }
+
+  if (start > 0 && end > start) {
+    memmove(b->data, b->data + start, end - start);
+  }
+
+  b->len = end - start;
+  b->data[b->len] = '\0';
+}
+
 static char *buffer_finish(buffer_t *b) { return b->data; /* caller owns */ }
 
 /* ------------------------------------------------------------------ */
@@ -453,6 +480,10 @@ static bool is_google_docs_wrapper(GumboElement *el, const char *tag_name) {
 /* ------------------------------------------------------------------ */
 
 static void walk_node(GumboNode *node, buffer_t *out);
+static void walk_node_with_whitespace(GumboNode *node, buffer_t *out,
+                                      bool preserve_whitespace);
+static void walk_children_with_whitespace(GumboNode *node, buffer_t *out,
+                                          bool preserve_whitespace);
 
 /* ------------------------------------------------------------------ */
 /*  Blockquote content flattening                                      */
@@ -461,6 +492,7 @@ static void walk_node(GumboNode *node, buffer_t *out);
 static void flatten_bq_node(GumboNode *node, buffer_t *ib, buffer_t *out);
 
 static void flush_inline_p(buffer_t *ib, buffer_t *out) {
+  buffer_trim_whitespace(ib);
   if (ib->len > 0) {
     buffer_append_str(out, "<p>");
     buffer_append(out, ib->data, ib->len);
@@ -508,15 +540,13 @@ static void flatten_bq_node(GumboNode *node, buffer_t *ib, buffer_t *out) {
 typedef struct {
   GumboElement *el;
   css_styles_t styles;
-  GumboNode **nested_lists;
-  int *nested_count;
-  int max_nested;
 } li_ctx_t;
 
 static void flatten_li_node(GumboNode *node, buffer_t *ib, buffer_t *out,
                             li_ctx_t *ctx);
 
 static void flush_li_buffer(buffer_t *ib, buffer_t *out, li_ctx_t *ctx) {
+  buffer_trim_whitespace(ib);
   if (ib->len == 0)
     return;
   buffer_append_str(out, "<li");
@@ -552,10 +582,8 @@ static void flatten_li_node(GumboNode *node, buffer_t *ib, buffer_t *out,
     return;
   }
   if (is_list_node(node)) {
-    if (*ctx->nested_count < ctx->max_nested) {
-      ctx->nested_lists[*ctx->nested_count] = node;
-      (*ctx->nested_count)++;
-    }
+    flush_li_buffer(ib, out, ctx);
+    walk_node(node, out);
     return;
   }
   if (is_br_node(node)) {
@@ -563,9 +591,7 @@ static void flatten_li_node(GumboNode *node, buffer_t *ib, buffer_t *out,
     return;
   }
   if (is_block_producing(node) || is_blockquote_node(node)) {
-    flush_li_buffer(ib, out, ctx);
-    flatten_li_children(node, ib, out, ctx);
-    flush_li_buffer(ib, out, ctx);
+    walk_node(node, ib);
     return;
   }
   walk_node(node, ib);
@@ -576,6 +602,11 @@ static void flatten_li_node(GumboNode *node, buffer_t *ib, buffer_t *out,
 /* ------------------------------------------------------------------ */
 
 static void walk_children(GumboNode *node, buffer_t *out) {
+  walk_children_with_whitespace(node, out, false);
+}
+
+static void walk_children_with_whitespace(GumboNode *node, buffer_t *out,
+                                          bool preserve_whitespace) {
   if (!is_element(node))
     return;
 
@@ -602,17 +633,13 @@ static void walk_children(GumboNode *node, buffer_t *out) {
       continue;
     }
 
-    /* Merge consecutive blockquotes, flattening content into <p>s */
+    /* Preserve blockquote children so nested lists/headings/code blocks keep
+       their own semantics while also inheriting quote styling. */
     if (is_blockquote_node(child)) {
       buffer_append_str(out, "<blockquote>");
-      buffer_t bq_ib = buffer_create(64);
-      while (i < children->length && is_blockquote_node(children->data[i])) {
-        flatten_bq_children(children->data[i], &bq_ib, out);
-        i++;
-      }
-      flush_inline_p(&bq_ib, out);
-      free(bq_ib.data);
+      walk_children_with_whitespace(child, out, preserve_whitespace);
       buffer_append_str(out, "</blockquote>");
+      i++;
       continue;
     }
 
@@ -634,11 +661,11 @@ static void walk_children(GumboNode *node, buffer_t *out) {
         /* Transparent inline wrapper for block/bq children */
         if (is_element(child) && has_block_or_bq_child(child)) {
           flush_inline_p(&ib, out);
-          walk_children(child, out);
+          walk_children_with_whitespace(child, out, preserve_whitespace);
           i++;
           continue;
         }
-        walk_node(child, &ib);
+        walk_node_with_whitespace(child, &ib, preserve_whitespace);
         i++;
       }
       flush_inline_p(&ib, out);
@@ -646,7 +673,7 @@ static void walk_children(GumboNode *node, buffer_t *out) {
       continue;
     }
 
-    walk_node(child, out);
+    walk_node_with_whitespace(child, out, preserve_whitespace);
     i++;
   }
 }
@@ -655,7 +682,96 @@ static void walk_children(GumboNode *node, buffer_t *out) {
 /*  walk_node — process a single DOM node                              */
 /* ------------------------------------------------------------------ */
 
+static bool text_contains_newline(const char *text, size_t text_len) {
+  for (size_t i = 0; i < text_len; i++) {
+    if (text[i] == '\n' || text[i] == '\r')
+      return true;
+  }
+  return false;
+}
+
+static bool node_has_inline_parent(GumboNode *node) {
+  if (!node || !node->parent || !is_element(node->parent))
+    return false;
+
+  char parent_name[64];
+  const char *name =
+      get_tag_name(node->parent, parent_name, sizeof(parent_name));
+  return name && classify_tag(name) == TAG_CLASS_INLINE;
+}
+
+static void append_escaped_text(buffer_t *out, const char *text_raw,
+                                size_t text_len) {
+  for (size_t i = 0; i < text_len; i++) {
+    char c = text_raw[i];
+    switch (c) {
+    case '<':
+      buffer_append_str(out, "&lt;");
+      break;
+    case '>':
+      buffer_append_str(out, "&gt;");
+      break;
+    case '&':
+      buffer_append_str(out, "&amp;");
+      break;
+    default:
+      buffer_append(out, &c, 1);
+      break;
+    }
+  }
+}
+
+static void append_normalized_text(buffer_t *out, const char *text_raw,
+                                   size_t text_len,
+                                   bool suppress_boundary_spaces) {
+  bool has_newline = text_contains_newline(text_raw, text_len);
+  if (!has_newline) {
+    append_escaped_text(out, text_raw, text_len);
+    return;
+  }
+
+  size_t start = 0;
+  while (start < text_len && is_ascii_whitespace(text_raw[start])) {
+    start++;
+  }
+
+  size_t end = text_len;
+  while (end > start && is_ascii_whitespace(text_raw[end - 1])) {
+    end--;
+  }
+
+  bool output_ends_with_tag = out->len > 0 && out->data[out->len - 1] == '>';
+  bool pending_space = !suppress_boundary_spaces && !output_ends_with_tag &&
+                       start > 0 && out->len > 0;
+  bool emitted_visible_text = false;
+  for (size_t i = start; i < end; i++) {
+    char c = text_raw[i];
+    if (is_ascii_whitespace(c)) {
+      pending_space = true;
+      continue;
+    }
+
+    if (pending_space && out->len > 0) {
+      buffer_append_str(out, " ");
+    }
+    pending_space = false;
+    append_escaped_text(out, &c, 1);
+    emitted_visible_text = true;
+  }
+
+  if (!suppress_boundary_spaces && end < text_len && emitted_visible_text &&
+      out->len > 0 &&
+      !is_ascii_whitespace(out->data[out->len - 1])) {
+    buffer_append_str(out, " ");
+  }
+}
+
 static void walk_node(GumboNode *node, buffer_t *out) {
+  walk_node_with_whitespace(node, out, false);
+}
+
+static void walk_node_with_whitespace(GumboNode *node, buffer_t *out,
+                                      bool preserve_whitespace) {
   if (!node)
     return;
 
@@ -664,36 +780,29 @@ static void walk_node(GumboNode *node, buffer_t *out) {
     const char *text_raw = node->v.text.text;
     if (text_raw) {
       size_t text_len = strlen(text_raw);
-      for (size_t i = 0; i < text_len; i++) {
-        char c = text_raw[i];
-        switch (c) {
-        case '<':
-          buffer_append_str(out, "&lt;");
-          break;
-        case '>':
-          buffer_append_str(out, "&gt;");
-          break;
-        case '&':
-          buffer_append_str(out, "&amp;");
-          break;
-        default:
-          buffer_append(out, &c, 1);
-          break;
+      if (preserve_whitespace) {
+        append_escaped_text(out, text_raw, text_len);
+      } else if (node->type == GUMBO_NODE_WHITESPACE) {
+        if (!text_contains_newline(text_raw, text_len) && out->len > 0) {
+          buffer_append_str(out, " ");
         }
+      } else {
+        append_normalized_text(out, text_raw, text_len,
+                               node_has_inline_parent(node));
       }
     }
     return;
   }
 
   if (!is_element(node)) {
-    walk_children(node, out);
+    walk_children_with_whitespace(node, out, preserve_whitespace);
     return;
   }
 
   GumboElement *el = &node->v.element;
   char name_buf[64];
   if (!get_tag_name(node, name_buf, sizeof(name_buf))) {
-    walk_children(node, out);
+    walk_children_with_whitespace(node, out, preserve_whitespace);
     return;
   }
 
@@ -705,7 +814,7 @@ static void walk_node(GumboNode *node, buffer_t *out) {
 
   /* Google Docs wrapper */
   if (is_google_docs_wrapper(el, name_buf)) {
-    walk_children(node, out);
+    walk_children_with_whitespace(node, out, preserve_whitespace);
     return;
   }
 
@@ -721,7 +830,7 @@ static void walk_node(GumboNode *node, buffer_t *out) {
     size_t slen = sval ? strlen(sval) : 0;
     css_styles_t s = parse_css_style(sval, slen);
     emit_styles_open(out, s);
-    walk_children(node, out);
+    walk_children_with_whitespace(node, out, preserve_whitespace);
     emit_styles_close(out, s);
     return;
   }
@@ -751,8 +860,9 @@ static void walk_node(GumboNode *node, buffer_t *out) {
           buffer_clear(&pb);
           continue;
         }
-        walk_node(dc, &pb);
+        walk_node_with_whitespace(dc, &pb, preserve_whitespace);
       }
+      buffer_trim_whitespace(&pb);
       if (pb.len > 0) {
         buffer_append_str(out, "<p>");
         emit_styles_open(out, s);
@@ -763,7 +873,7 @@ static void walk_node(GumboNode *node, buffer_t *out) {
       free(pb.data);
     } else {
       emit_styles_open(out, s);
-      walk_children(node, out);
+      walk_children_with_whitespace(node, out, preserve_whitespace);
       emit_styles_close(out, s);
     }
     return;
@@ -776,7 +886,7 @@ static void walk_node(GumboNode *node, buffer_t *out) {
       strcmp(name_buf, "th") == 0 || strcmp(name_buf, "caption") == 0 ||
       strcmp(name_buf, "colgroup") == 0 || strcmp(name_buf, "col") == 0) {
     if (strcmp(name_buf, "td") == 0 || strcmp(name_buf, "th") == 0) {
-      walk_children(node, out);
+      walk_children_with_whitespace(node, out, preserve_whitespace);
       /* Check if there's a next sibling element */
       GumboNode *parent = node->parent;
       if (parent && is_element(parent)) {
@@ -796,7 +906,8 @@ static void walk_node(GumboNode *node, buffer_t *out) {
       }
     } else if (strcmp(name_buf, "tr") == 0) {
       buffer_t row = buffer_create(64);
-      walk_children(node, &row);
+      walk_children_with_whitespace(node, &row, preserve_whitespace);
+      buffer_trim_whitespace(&row);
       if (row.len > 0) {
         buffer_append_str(out, "<p>");
         buffer_append(out, row.data, row.len);
@@ -804,7 +915,7 @@ static void walk_node(GumboNode *node, buffer_t *out) {
       }
       free(row.data);
     } else {
-      walk_children(node, out);
+      walk_children_with_whitespace(node, out, preserve_whitespace);
     }
     return;
   }
@@ -813,7 +924,7 @@ static void walk_node(GumboNode *node, buffer_t *out) {
   switch (cls) {
   case TAG_CLASS_PASS:
   case TAG_CLASS_SKIP:
-    walk_children(node, out);
+    walk_children_with_whitespace(node, out, preserve_whitespace);
     break;
 
   case TAG_CLASS_SELF_CLOSING:
@@ -831,28 +942,33 @@ static void walk_node(GumboNode *node, buffer_t *out) {
 
     /* <li>: always flatten */
     if (strcmp(out_name, "li") == 0) {
-      GumboNode *nested_lists[16];
-      int nested_count = 0;
       buffer_t li_ib = buffer_create(64);
-      li_ctx_t ctx = {el, es, nested_lists, &nested_count, 16};
+      li_ctx_t ctx = {el, es};
       flatten_li_children(node, &li_ib, out, &ctx);
       flush_li_buffer(&li_ib, out, &ctx);
       free(li_ib.data);
-      for (int k = 0; k < nested_count; k++)
-        walk_children(nested_lists[k], out);
       break;
     }
 
     /* <codeblock>: wrap inline content in <p> */
     if (strcmp(out_name, "codeblock") == 0) {
       bool wrap = is_purely_inline(node);
+      buffer_t cb = buffer_create(64);
+      walk_children_with_whitespace(node, &cb, true);
+      buffer_trim_whitespace(&cb);
       buffer_append_str(out, "<codeblock>");
       if (wrap)
         buffer_append_str(out, "<p>");
-      walk_children(node, out);
+      buffer_append(out, cb.data, cb.len);
       if (wrap)
         buffer_append_str(out, "</p>");
       buffer_append_str(out, "</codeblock>");
+      free(cb.data);
+      break;
+    }
+
+    if (preserve_whitespace && strcmp(out_name, "code") == 0) {
+      walk_children_with_whitespace(node, out, preserve_whitespace);
       break;
     }
 
@@ -862,7 +978,7 @@ static void walk_node(GumboNode *node, buffer_t *out) {
     emit_attributes(el, out_name, out);
     buffer_append_str(out, ">");
     emit_styles_open(out, es);
-    walk_children(node, out);
+    walk_children_with_whitespace(node, out, preserve_whitespace);
     emit_styles_close(out, es);
     buffer_append_str(out, "</");
     buffer_append_str(out, out_name);

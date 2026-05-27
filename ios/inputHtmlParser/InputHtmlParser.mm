@@ -4,7 +4,6 @@
 #import "HtmlParser.h"
 #import "StringExtension.h"
 #import "StyleHeaders.h"
-#import "StyleUtils.h"
 #import "TextInsertionUtils.h"
 #import <React/RCTLog.h>
 
@@ -130,57 +129,70 @@
         NSMakeRange(offset + zeroWidthSpaceOffset + parsedRange.location,
                     parsedRange.length);
 
-    // of course any changes here need to take blocks and conflicts into
-    // consideration
-    if ([StyleUtils handleStyleBlocksAndConflicts:[[baseStyle class] getType]
-                                            range:styleRange
-                                          forHost:_input]) {
-      BOOL shouldAddTypingAttr =
-          styleRange.location + styleRange.length ==
-          plainTextLength + offset + zeroWidthSpaceOffset;
+    BOOL shouldAddTypingAttr =
+        styleRange.location + styleRange.length ==
+        plainTextLength + offset + zeroWidthSpaceOffset;
 
-      if ([styleType isEqualToNumber:@([LinkStyle getType])]) {
-        LinkData *linkData = (LinkData *)stylePair.styleValue;
-        [((LinkStyle *)baseStyle) addLink:linkData
-                                    range:styleRange
-                            withSelection:NO];
-      } else if ([styleType isEqualToNumber:@([MentionStyle getType])]) {
-        MentionParams *params = (MentionParams *)stylePair.styleValue;
-        [((MentionStyle *)baseStyle) addMentionAtRange:styleRange
-                                                params:params];
-      } else if ([styleType isEqualToNumber:@([ImageStyle getType])]) {
-        ImageData *imgData = (ImageData *)stylePair.styleValue;
-        [((ImageStyle *)baseStyle) addImageAtRange:styleRange
-                                         imageData:imgData
-                                     withSelection:NO
-                                    withDirtyRange:YES];
-      } else if ([styleType isEqualToNumber:@([CheckboxListStyle getType])]) {
-        NSDictionary *checkboxStates = (NSDictionary *)stylePair.styleValue;
-        CheckboxListStyle *cbLStyle = (CheckboxListStyle *)baseStyle;
+    if ([styleType isEqualToNumber:@([LinkStyle getType])]) {
+      LinkData *linkData = (LinkData *)stylePair.styleValue;
+      [((LinkStyle *)baseStyle) addLink:linkData
+                                  range:styleRange
+                          withSelection:NO];
+    } else if ([styleType isEqualToNumber:@([MentionStyle getType])]) {
+      MentionParams *params = (MentionParams *)stylePair.styleValue;
+      [((MentionStyle *)baseStyle) addMentionAtRange:styleRange
+                                              params:params];
+    } else if ([styleType isEqualToNumber:@([ImageStyle getType])]) {
+      ImageData *imgData = (ImageData *)stylePair.styleValue;
+      [((ImageStyle *)baseStyle) addImageAtRange:styleRange
+                                       imageData:imgData
+                                   withSelection:NO
+                                  withDirtyRange:YES];
+    } else if ([styleType isEqualToNumber:@([CheckboxListStyle getType])]) {
+      NSDictionary *checkboxStates = (NSDictionary *)stylePair.styleValue;
+      CheckboxListStyle *cbLStyle = (CheckboxListStyle *)baseStyle;
 
-        // First apply the checkbox list style to the entire range with
-        // unchecked value
-        [cbLStyle addWithChecked:NO
-                           range:styleRange
-                      withTyping:shouldAddTypingAttr
-                  withDirtyRange:YES];
+      // First apply the checkbox list style to the entire range with
+      // unchecked value
+      [cbLStyle addWithChecked:NO
+                         range:styleRange
+                    withTyping:shouldAddTypingAttr
+                withDirtyRange:YES];
 
-        if (checkboxStates && checkboxStates.count > 0) {
-          // Then toggle checked checkboxes
-          for (NSNumber *key in checkboxStates) {
-            NSUInteger checkboxPosition =
-                offset + zeroWidthSpaceOffset + [key unsignedIntegerValue];
-            BOOL isChecked = [checkboxStates[key] boolValue];
-            if (isChecked) {
-              [cbLStyle toggleCheckedAt:checkboxPosition withDirtyRange:YES];
-            }
+      if (checkboxStates && checkboxStates.count > 0) {
+        // Then toggle checked checkboxes
+        for (NSNumber *key in checkboxStates) {
+          NSUInteger checkboxPosition =
+              offset + zeroWidthSpaceOffset + [key unsignedIntegerValue];
+          BOOL isChecked = [checkboxStates[key] boolValue];
+          if (isChecked) {
+            [cbLStyle toggleCheckedAt:checkboxPosition withDirtyRange:YES];
           }
         }
-      } else {
-        [baseStyle add:styleRange
-                withTyping:shouldAddTypingAttr
-            withDirtyRange:YES];
       }
+    } else if ([styleType isEqualToNumber:@([UnorderedListStyle getType])] ||
+               [styleType isEqualToNumber:@([OrderedListStyle getType])]) {
+      NSString *markerValue =
+          [stylePair.styleValue isKindOfClass:[NSString class]]
+              ? (NSString *)stylePair.styleValue
+              : [baseStyle getValue];
+      [baseStyle add:styleRange
+             withValue:markerValue
+            withTyping:shouldAddTypingAttr
+        withDirtyRange:YES];
+    } else if ([styleType isEqualToNumber:@([BlockQuoteStyle getType])]) {
+      NSString *markerValue =
+          [stylePair.styleValue isKindOfClass:[NSString class]]
+              ? (NSString *)stylePair.styleValue
+              : [baseStyle getValue];
+      [baseStyle add:styleRange
+             withValue:markerValue
+            withTyping:shouldAddTypingAttr
+        withDirtyRange:YES];
+    } else {
+      [baseStyle add:styleRange
+              withTyping:shouldAddTypingAttr
+          withDirtyRange:YES];
     }
 
     NSInteger delta = (NSInteger)_input->textView.textStorage.string.length -

@@ -4,6 +4,46 @@
 #import "RangeUtils.h"
 #import "StyleHeaders.h"
 
+static BOOL EnrichedInlineCodeIsDecorativeCharacter(unichar character) {
+  return [[NSCharacterSet whitespaceAndNewlineCharacterSet]
+             characterIsMember:character] ||
+         character == 0x200B || character == 0xFFFC;
+}
+
+static NSRange EnrichedInlineCodeVisibleRange(NSString *text, NSRange range) {
+  if (range.location >= text.length || range.length == 0) {
+    return NSMakeRange(range.location, 0);
+  }
+
+  NSUInteger start = range.location;
+  NSUInteger end = MIN(NSMaxRange(range), text.length);
+  while (start < end &&
+         EnrichedInlineCodeIsDecorativeCharacter(
+             [text characterAtIndex:start])) {
+    start++;
+  }
+
+  while (end > start &&
+         EnrichedInlineCodeIsDecorativeCharacter([text characterAtIndex:end - 1])) {
+    end--;
+  }
+
+  return NSMakeRange(start, end - start);
+}
+
+static BOOL EnrichedInlineCodeParagraphHasBlockMarker(NSParagraphStyle *pStyle) {
+  for (NSTextList *textList in pStyle.textLists) {
+    NSString *markerFormat = textList.markerFormat;
+    if ([markerFormat isEqualToString:@"EnrichedBlockQuote"] ||
+        [markerFormat hasPrefix:@"EnrichedUnorderedList"] ||
+        [markerFormat hasPrefix:@"EnrichedOrderedList"] ||
+        [markerFormat hasPrefix:@"EnrichedCheckbox"]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 @implementation InlineCodeStyle
 
 + (StyleType)getType {
@@ -25,27 +65,29 @@
 
   for (NSValue *value in nonNewlineRanges) {
     NSRange subRange = [value rangeValue];
-
+    NSRange visibleRange = EnrichedInlineCodeVisibleRange(
+        self.host.textView.textStorage.string, subRange);
+    if (visibleRange.length == 0) {
+      continue;
+    }
     [self.host.textView.textStorage
-        addAttribute:NSBackgroundColorAttributeName
-               value:[[self.host.config inlineCodeBgColor]
-                         colorWithAlphaIfNotTransparent:0.4]
-               range:subRange];
+        removeAttribute:NSBackgroundColorAttributeName
+                  range:visibleRange];
     [self.host.textView.textStorage
         addAttribute:NSForegroundColorAttributeName
                value:[self.host.config inlineCodeFgColor]
-               range:subRange];
+               range:visibleRange];
     [self.host.textView.textStorage
         addAttribute:NSUnderlineColorAttributeName
                value:[self.host.config inlineCodeFgColor]
-               range:subRange];
+               range:visibleRange];
     [self.host.textView.textStorage
         addAttribute:NSStrikethroughColorAttributeName
                value:[self.host.config inlineCodeFgColor]
-               range:subRange];
+               range:visibleRange];
     [self.host.textView.textStorage
         enumerateAttribute:NSFontAttributeName
-                   inRange:subRange
+                   inRange:visibleRange
                    options:0
                 usingBlock:^(id _Nullable value, NSRange fontRange,
                              BOOL *_Nonnull stop) {
@@ -59,6 +101,48 @@
                                range:fontRange];
                   }
                 }];
+  }
+
+  NSMutableSet<NSString *> *spacedParagraphs = [[NSMutableSet alloc] init];
+  NSString *text = self.host.textView.textStorage.string;
+  for (NSValue *value in nonNewlineRanges) {
+    NSRange subRange = [value rangeValue];
+    if (subRange.location >= text.length) {
+      continue;
+    }
+
+    NSRange paragraphRange = [text paragraphRangeForRange:subRange];
+    NSString *paragraphKey = NSStringFromRange(paragraphRange);
+    if ([spacedParagraphs containsObject:paragraphKey]) {
+      continue;
+    }
+
+    NSRange visibleParagraphRange =
+        EnrichedInlineCodeVisibleRange(text, paragraphRange);
+    if (visibleParagraphRange.length == 0 ||
+        visibleParagraphRange.location < subRange.location ||
+        NSMaxRange(visibleParagraphRange) > NSMaxRange(subRange)) {
+      continue;
+    }
+
+    NSParagraphStyle *existingStyle =
+        [self.host.textView.textStorage attribute:NSParagraphStyleAttributeName
+                                          atIndex:visibleParagraphRange.location
+                                   effectiveRange:nil];
+    if (existingStyle != nullptr &&
+        EnrichedInlineCodeParagraphHasBlockMarker(existingStyle)) {
+      continue;
+    }
+
+    NSMutableParagraphStyle *pStyle =
+        existingStyle != nullptr ? [existingStyle mutableCopy]
+                                 : [[NSMutableParagraphStyle alloc] init];
+    pStyle.paragraphSpacingBefore = MAX(pStyle.paragraphSpacingBefore, 3.0);
+    pStyle.paragraphSpacing = MAX(pStyle.paragraphSpacing, 5.0);
+    [self.host.textView.textStorage addAttribute:NSParagraphStyleAttributeName
+                                           value:pStyle
+                                           range:paragraphRange];
+    [spacedParagraphs addObject:paragraphKey];
   }
 }
 

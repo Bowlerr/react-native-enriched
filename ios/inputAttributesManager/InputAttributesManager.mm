@@ -170,7 +170,7 @@
         NSParagraphStyle *pStyle =
             (NSParagraphStyle *)_input->textView
                 .typingAttributes[NSParagraphStyleAttributeName];
-        if (pStyle != nullptr && pStyle.textLists.count >= 1) {
+        if (pStyle != nullptr && pStyle.textLists.count > 0) {
           NSMutableParagraphStyle *newPStyle =
               [[NSMutableParagraphStyle alloc] init];
           newPStyle.textLists = pStyle.textLists;

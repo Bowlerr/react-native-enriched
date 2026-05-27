@@ -5,7 +5,6 @@
 #import "LinkData.h"
 #import "MentionParams.h"
 #import "StyleHeaders.h"
-#import "StyleUtils.h"
 #import "ZeroWidthSpaceUtils.h"
 #import <React/RCTLog.h>
 
@@ -63,6 +62,8 @@
   // be re-run after all paragraph styles have applied their visual attributes.
   // Each entry is @[style, adjustedRange].
   NSMutableArray *pendingInlineApply = [NSMutableArray array];
+  NSMutableArray *pendingInlineCodeApply = [NSMutableArray array];
+  NSMutableArray *pendingHeadingApply = [NSMutableArray array];
 
   // Paragraph styles call applyStyling: immediately; inline styles
   // defer it so that paragraph visual attributes are already in
@@ -83,12 +84,6 @@
     // we need absolute ranges relative to the whole existing text
     NSRange styleRange = NSMakeRange(
         zeroWidthSpaceOffset + parsedRange.location, parsedRange.length);
-
-    if (![StyleUtils handleStyleBlocksAndConflicts:[[style class] getType]
-                                             range:styleRange
-                                           forHost:_view]) {
-      continue;
-    }
 
     if ([styleType isEqualToNumber:@([LinkStyle getType])]) {
       LinkData *linkData = (LinkData *)stylePair.styleValue;
@@ -122,6 +117,25 @@
           }
         }
       }
+    } else if ([styleType isEqualToNumber:@([UnorderedListStyle getType])] ||
+               [styleType isEqualToNumber:@([OrderedListStyle getType])]) {
+      NSString *markerValue =
+          [stylePair.styleValue isKindOfClass:[NSString class]]
+              ? (NSString *)stylePair.styleValue
+              : [style getValue];
+      [style add:styleRange
+             withValue:markerValue
+            withTyping:NO
+        withDirtyRange:NO];
+    } else if ([styleType isEqualToNumber:@([BlockQuoteStyle getType])]) {
+      NSString *markerValue =
+          [stylePair.styleValue isKindOfClass:[NSString class]]
+              ? (NSString *)stylePair.styleValue
+              : [style getValue];
+      [style add:styleRange
+             withValue:markerValue
+            withTyping:NO
+        withDirtyRange:NO];
     } else {
       [style add:styleRange withTyping:NO withDirtyRange:NO];
     }
@@ -138,11 +152,29 @@
     NSRange adjustedStyleRange = NSMakeRange(
         styleRange.location, styleRange.length + (NSUInteger)MAX(0LL, delta));
 
+    BOOL isHeadingStyle =
+        [styleType isEqualToNumber:@([H1Style getType])] ||
+        [styleType isEqualToNumber:@([H2Style getType])] ||
+        [styleType isEqualToNumber:@([H3Style getType])] ||
+        [styleType isEqualToNumber:@([H4Style getType])] ||
+        [styleType isEqualToNumber:@([H5Style getType])] ||
+        [styleType isEqualToNumber:@([H6Style getType])];
+
     if ([style isParagraph]) {
-      [style applyStyling:adjustedStyleRange];
+      if (isHeadingStyle) {
+        [pendingHeadingApply
+            addObject:@[ style, [NSValue valueWithRange:adjustedStyleRange] ]];
+      } else {
+        [style applyStyling:adjustedStyleRange];
+      }
     } else {
-      [pendingInlineApply
-          addObject:@[ style, [NSValue valueWithRange:adjustedStyleRange] ]];
+      NSArray *pendingEntry =
+          @[ style, [NSValue valueWithRange:adjustedStyleRange] ];
+      if ([styleType isEqualToNumber:@([InlineCodeStyle getType])]) {
+        [pendingInlineCodeApply addObject:pendingEntry];
+      } else {
+        [pendingInlineApply addObject:pendingEntry];
+      }
     }
 
     // Image shifts are already handled by _precedingImageCount during tag
@@ -152,10 +184,29 @@
     }
   }
 
-  // Apply visual styling for inline styles
+  // Headings apply after paragraph container styles so they can react to
+  // context such as headings nested inside list items or blockquotes.
+  for (NSArray *entry in pendingHeadingApply) {
+    StyleBase *style = entry[0];
+    NSRange adjustedStyleRange = [((NSValue *)entry[1]) rangeValue];
+    [style applyStyling:adjustedStyleRange];
+  }
+
+  // Apply visual styling for inline styles. Inline code runs last so its
+  // foreground and background take precedence over link styling, matching the
+  // web code CSS cascade.
+  [pendingInlineApply addObjectsFromArray:pendingInlineCodeApply];
   for (NSArray *entry in pendingInlineApply) {
     StyleBase *style = entry[0];
     NSRange adjustedStyleRange = [((NSValue *)entry[1]) rangeValue];
+    if ([[style class] getType] == [InlineCodeStyle getType]) {
+      CodeBlockStyle *codeBlockStyle =
+          _view->stylesDict[@([CodeBlockStyle getType])];
+      if (codeBlockStyle != nullptr &&
+          [codeBlockStyle any:adjustedStyleRange]) {
+        continue;
+      }
+    }
     [style applyStyling:adjustedStyleRange];
   }
 }

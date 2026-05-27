@@ -18,6 +18,17 @@
          [tagName isEqualToString:@"codeblock"];
 }
 
++ (BOOL)shouldInsertLineBreakBeforeOpeningBlockTag:(NSString *)tagName
+                                         plainText:(NSString *)plainText {
+  if (![self isBlockTag:tagName] || plainText.length == 0) {
+    return NO;
+  }
+
+  unichar lastCharacter = [plainText characterAtIndex:plainText.length - 1];
+  return ![[NSCharacterSet newlineCharacterSet]
+      characterIsMember:lastCharacter];
+}
+
 /**
  * Prepares HTML for the parser by stripping extraneous whitespace and newlines
  * from structural tags, while preserving them within text content.
@@ -154,7 +165,12 @@
        precedingImageCount:(NSInteger *)precedingImageCount {
   NSMutableArray *tagEntry = [[NSMutableArray alloc] init];
 
-  NSArray *tagData = ongoingTags[tagName];
+  NSMutableArray *tagStack = ongoingTags[tagName];
+  NSArray *tagData = tagStack.lastObject;
+  if (tagData == nil) {
+    return;
+  }
+
   NSInteger tagLocation = [((NSNumber *)tagData[0]) intValue];
   NSInteger openImageCount = [((NSNumber *)tagData[1]) intValue];
   NSInteger currentImageCount = *precedingImageCount;
@@ -176,7 +192,10 @@
   }
 
   [processedTags addObject:tagEntry];
-  [ongoingTags removeObjectForKey:tagName];
+  [tagStack removeLastObject];
+  if (tagStack.count == 0) {
+    [ongoingTags removeObjectForKey:tagName];
+  }
 
   if ([tagName isEqualToString:@"img"]) {
     (*precedingImageCount)++;
@@ -185,7 +204,169 @@
 
 + (BOOL)isUlCheckboxList:(NSString *)params {
   return ([params containsString:@"data-type=\"checkbox\""] ||
-          [params containsString:@"data-type='checkbox'"]);
+          [params containsString:@"data-type='checkbox'"] ||
+          [params containsString:@"data-type=\"checkboxList\""] ||
+          [params containsString:@"data-type='checkboxList'"]);
+}
+
++ (NSInteger)currentListLevelFromOngoingTags:(NSDictionary *)ongoingTags {
+  NSInteger level = 0;
+  for (NSString *tagName in @[ @"ul", @"ol" ]) {
+    NSArray *tagStack = ongoingTags[tagName];
+    level += tagStack.count;
+  }
+  return level;
+}
+
++ (NSString *)paramsByAppendingListLevel:(NSString *)params
+                                   level:(NSInteger)level
+                               contextId:(NSInteger)contextId {
+  NSString *levelParam = [NSString
+      stringWithFormat:@"data-enriched-list-level=\"%ld\" "
+                       @"data-enriched-list-context=\"%ld\"",
+                       (long)level, (long)contextId];
+  if (params.length == 0) {
+    return levelParam;
+  }
+  return [NSString stringWithFormat:@"%@ %@", params, levelParam];
+}
+
++ (NSString *)paramsByAppendingListItemContext:(NSString *)params
+                                       listTag:(NSString *)listTag
+                                         level:(NSInteger)level
+                                     contextId:(NSInteger)contextId {
+  NSString *contextParams = [NSString
+      stringWithFormat:@"data-enriched-list-item=\"%@\" "
+                       @"data-enriched-list-level=\"%ld\" "
+                       @"data-enriched-list-context=\"%ld\"",
+                       listTag, (long)level, (long)contextId];
+  if (params.length == 0) {
+    return contextParams;
+  }
+  return [NSString stringWithFormat:@"%@ %@", params, contextParams];
+}
+
++ (NSInteger)listLevelFromParams:(NSString *)params {
+  NSRegularExpression *levelRegex = [NSRegularExpression
+      regularExpressionWithPattern:@"data-enriched-list-level=['\\\"]([0-9]+)['\\\"]"
+                           options:0
+                             error:nil];
+  NSTextCheckingResult *match =
+      [levelRegex firstMatchInString:params
+                             options:0
+                               range:NSMakeRange(0, params.length)];
+  if (match == nullptr || match.numberOfRanges < 2) {
+    return 0;
+  }
+  NSString *levelString = [params substringWithRange:[match rangeAtIndex:1]];
+  return MAX(0, [levelString integerValue]);
+}
+
++ (NSInteger)listContextFromParams:(NSString *)params {
+  NSRegularExpression *contextRegex = [NSRegularExpression
+      regularExpressionWithPattern:@"data-enriched-list-context=['\\\"]([0-9]+)['\\\"]"
+                           options:0
+                             error:nil];
+  NSTextCheckingResult *match =
+      [contextRegex firstMatchInString:params
+                               options:0
+                                 range:NSMakeRange(0, params.length)];
+  if (match == nullptr || match.numberOfRanges < 2) {
+    return -1;
+  }
+  NSString *contextString = [params substringWithRange:[match rangeAtIndex:1]];
+  return MAX(0, [contextString integerValue]);
+}
+
++ (NSString *)listItemTagFromParams:(NSString *)params {
+  NSRegularExpression *itemRegex = [NSRegularExpression
+      regularExpressionWithPattern:@"data-enriched-list-item=['\\\"]([^'\\\"]+)['\\\"]"
+                           options:0
+                             error:nil];
+  NSTextCheckingResult *match =
+      [itemRegex firstMatchInString:params
+                             options:0
+                               range:NSMakeRange(0, params.length)];
+  if (match == nullptr || match.numberOfRanges < 2) {
+    return nil;
+  }
+  return [params substringWithRange:[match rangeAtIndex:1]];
+}
+
++ (NSString *)listMarkerValueWithBase:(NSString *)baseValue
+                                level:(NSInteger)level {
+  if (level <= 0) {
+    return baseValue;
+  }
+  return [NSString stringWithFormat:@"%@:%ld", baseValue, (long)level];
+}
+
++ (NSString *)listMarkerValueWithBase:(NSString *)baseValue
+                                level:(NSInteger)level
+                            contextId:(NSInteger)contextId {
+  if (contextId < 0) {
+    return [self listMarkerValueWithBase:baseValue level:level];
+  }
+  return [NSString stringWithFormat:@"%@:%ld:%ld", baseValue, (long)level,
+                                    (long)contextId];
+}
+
++ (BOOL)paragraphRangeHasVisibleContent:(NSString *)text range:(NSRange)range {
+  if (range.location >= text.length) {
+    return NO;
+  }
+
+  NSUInteger safeLength = MIN(range.length, text.length - range.location);
+  NSString *paragraph =
+      [text substringWithRange:NSMakeRange(range.location, safeLength)];
+  NSMutableString *normalized = [paragraph mutableCopy];
+  [normalized replaceOccurrencesOfString:@"\u200B"
+                              withString:@""
+                                 options:0
+                                   range:NSMakeRange(0, normalized.length)];
+  [normalized replaceOccurrencesOfString:@"\uFFFC"
+                              withString:@""
+                                 options:0
+                                   range:NSMakeRange(0, normalized.length)];
+  NSString *trimmed = [normalized
+      stringByTrimmingCharactersInSet:[NSCharacterSet
+                                          whitespaceAndNewlineCharacterSet]];
+  return trimmed.length > 0;
+}
+
++ (NSArray<NSValue *> *)paragraphRangesInListItemRange:(NSRange)itemRange
+                                             plainText:(NSString *)plainText {
+  NSMutableArray<NSValue *> *paragraphRanges = [[NSMutableArray alloc] init];
+  NSUInteger itemEnd = MIN(NSMaxRange(itemRange), plainText.length);
+  NSUInteger cursor = itemRange.location;
+
+  while (cursor < itemEnd) {
+    NSRange paragraphRange =
+        [plainText paragraphRangeForRange:NSMakeRange(cursor, 0)];
+    NSRange clippedRange = NSIntersectionRange(paragraphRange, itemRange);
+    if (clippedRange.length > 0 &&
+        [self paragraphRangeHasVisibleContent:plainText range:clippedRange]) {
+      [paragraphRanges addObject:[NSValue valueWithRange:clippedRange]];
+    }
+
+    NSUInteger nextCursor = NSMaxRange(paragraphRange);
+    if (nextCursor <= cursor) {
+      break;
+    }
+    cursor = nextCursor;
+  }
+
+  return paragraphRanges;
+}
+
++ (BOOL)isInsideCheckboxList:(NSDictionary *)ongoingTags {
+  NSArray *ulStack = ongoingTags[@"ul"];
+  for (NSArray *tagData in [ulStack reverseObjectEnumerator]) {
+    if (tagData.count > 2 && [self isUlCheckboxList:(NSString *)tagData[2]]) {
+      return YES;
+    }
+  }
+  return NO;
 }
 
 + (NSDictionary *)prepareCheckboxListStyleValue:(NSValue *)rangeValue
@@ -442,12 +623,15 @@
 + (NSArray *_Nonnull)getTextAndStylesFromHtml:(NSString *_Nonnull)fixedHtml {
   NSMutableString *plainText = [[NSMutableString alloc] initWithString:@""];
   NSMutableDictionary *ongoingTags = [[NSMutableDictionary alloc] init];
+  NSMutableArray<NSString *> *ongoingListTags = [[NSMutableArray alloc] init];
+  NSMutableArray<NSNumber *> *ongoingListContextIds =
+      [[NSMutableArray alloc] init];
   NSMutableArray *initiallyProcessedTags = [[NSMutableArray alloc] init];
   NSMutableDictionary *checkboxStates = [[NSMutableDictionary alloc] init];
   NSMutableArray<AlignmentEntry *> *foundAlignments =
       [[NSMutableArray alloc] init];
-  BOOL insideCheckboxList = NO;
   NSInteger precedingImageCount = 0;
+  NSInteger listContextId = 0;
   BOOL insideTag = NO;
   BOOL gettingTagName = NO;
   BOOL gettingTagParams = NO;
@@ -488,63 +672,94 @@
 
       if ([currentTagName isEqualToString:@"br"]) {
         // do nothing, we don't include these tags in styles
-      } else if ([currentTagName isEqualToString:@"li"]) {
-        // Only track checkbox state if we're inside a checkbox list
-        if (insideCheckboxList && !closingTag) {
-          BOOL isChecked = [currentTagParams containsString:@"checked"];
-          checkboxStates[@(plainText.length)] = @(isChecked);
-        }
       } else if (!closingTag) {
-        BOOL isPlainParagraph =
-            [currentTagName isEqualToString:@"p"] &&
-            (!currentTagParams || [currentTagParams length] == 0);
+        BOOL isPlainParagraph = [currentTagName isEqualToString:@"p"] &&
+                                currentTagParams.length == 0;
 
-        if (isPlainParagraph) {
-          continue;
-        }
-        // we finish opening tag - get its location, the current
-        // precedingImageCount and optionally params and put them under tag name
-        // key in ongoingTags. Storing the open-time image count lets
-        // finalizeTagEntry: correctly shift the start and extend the length
-        // so the range covers any images finalized between open and close.
-        NSMutableArray *tagArr = [[NSMutableArray alloc] init];
-        [tagArr addObject:[NSNumber numberWithInteger:plainText.length]];
-        [tagArr addObject:[NSNumber numberWithInteger:precedingImageCount]];
-        if (currentTagParams.length > 0) {
-          [tagArr addObject:[currentTagParams copy]];
-        }
-        ongoingTags[currentTagName] = tagArr;
+        if (!isPlainParagraph) {
+          // Only track checkbox state if we're inside a checkbox list.
+          if ([currentTagName isEqualToString:@"li"] &&
+              [self isInsideCheckboxList:ongoingTags]) {
+            BOOL isChecked = [currentTagParams containsString:@"checked"];
+            checkboxStates[@(plainText.length)] = @(isChecked);
+          }
 
-        // Check if this is a checkbox list
-        if ([currentTagName isEqualToString:@"ul"] &&
-            [self isUlCheckboxList:currentTagParams]) {
-          insideCheckboxList = YES;
-        }
+          if ([self shouldInsertLineBreakBeforeOpeningBlockTag:currentTagName
+                                                     plainText:plainText]) {
+            [plainText appendString:@"\n"];
+          }
 
-        // skip one newline if it was added after opening tags that are in
-        // separate lines
-        if ([self isBlockTag:currentTagName] && i + 1 < fixedHtml.length &&
-            [[NSCharacterSet newlineCharacterSet]
-                characterIsMember:[fixedHtml characterAtIndex:i + 1]]) {
-          i += 1;
-        }
+          // we finish opening tag - get its location, the current
+          // precedingImageCount and optionally params and put them under tag name
+          // key in ongoingTags. Storing the open-time image count lets
+          // finalizeTagEntry: correctly shift the start and extend the length
+          // so the range covers any images finalized between open and close.
+          NSMutableArray *tagArr = [[NSMutableArray alloc] init];
+          [tagArr addObject:[NSNumber numberWithInteger:plainText.length]];
+          [tagArr addObject:[NSNumber numberWithInteger:precedingImageCount]];
 
-        if (isSelfClosing) {
-          [self finalizeTagEntry:currentTagName
-                         ongoingTags:ongoingTags
-              initiallyProcessedTags:initiallyProcessedTags
-                           plainText:plainText
-                 precedingImageCount:&precedingImageCount];
+          NSString *tagParams = [currentTagParams copy];
+          if ([currentTagName isEqualToString:@"ul"] ||
+              [currentTagName isEqualToString:@"ol"]) {
+            NSInteger listLevel = ongoingListTags.count;
+            NSInteger currentListContextId = listContextId++;
+            tagParams = [self paramsByAppendingListLevel:tagParams
+                                                   level:listLevel
+                                               contextId:currentListContextId];
+            [ongoingListContextIds
+                addObject:[NSNumber numberWithInteger:currentListContextId]];
+          } else if ([currentTagName isEqualToString:@"li"] &&
+                     ongoingListTags.count > 0) {
+            NSString *parentListTag = [self isInsideCheckboxList:ongoingTags]
+                                          ? @"checkbox"
+                                          : ongoingListTags.lastObject;
+            NSInteger listLevel = MAX(0, (NSInteger)ongoingListTags.count - 1);
+            NSInteger currentListContextId =
+                ongoingListContextIds.count > 0
+                    ? [ongoingListContextIds.lastObject integerValue]
+                    : -1;
+            tagParams = [self paramsByAppendingListItemContext:tagParams
+                                                       listTag:parentListTag
+                                                         level:listLevel
+                                                     contextId:
+                                                         currentListContextId];
+          }
+
+          if (tagParams.length > 0) {
+            [tagArr addObject:tagParams];
+          }
+
+          NSMutableArray *tagStack = ongoingTags[currentTagName];
+          if (tagStack == nil) {
+            tagStack = [[NSMutableArray alloc] init];
+            ongoingTags[currentTagName] = tagStack;
+          }
+          [tagStack addObject:tagArr];
+
+          if ([currentTagName isEqualToString:@"ul"] ||
+              [currentTagName isEqualToString:@"ol"]) {
+            [ongoingListTags addObject:[currentTagName copy]];
+          }
+
+          // skip one newline if it was added after opening tags that are in
+          // separate lines
+          if ([self isBlockTag:currentTagName] && i + 1 < fixedHtml.length &&
+              [[NSCharacterSet newlineCharacterSet]
+                  characterIsMember:[fixedHtml characterAtIndex:i + 1]]) {
+            i += 1;
+          }
+
+          if (isSelfClosing) {
+            [self finalizeTagEntry:currentTagName
+                           ongoingTags:ongoingTags
+                initiallyProcessedTags:initiallyProcessedTags
+                             plainText:plainText
+                   precedingImageCount:&precedingImageCount];
+          }
         }
       } else {
         // we finish closing tags - pack tag name, tag range and optionally tag
         // params into an entry that goes inside initiallyProcessedTags
-
-        // Check if we're closing a checkbox list by looking at the params
-        if ([currentTagName isEqualToString:@"ul"] &&
-            [self isUlCheckboxList:currentTagParams]) {
-          insideCheckboxList = NO;
-        }
 
         BOOL isBlockTag = [self isBlockTag:currentTagName];
 
@@ -559,7 +774,8 @@
               mutableCopy];
         }
 
-        [self checkForAlignments:ongoingTags[currentTagName]
+        NSArray *tagStack = ongoingTags[currentTagName];
+        [self checkForAlignments:tagStack.lastObject
                        plainText:plainText
                  foundAlignments:foundAlignments
              precedingImageCount:precedingImageCount];
@@ -568,6 +784,15 @@
             initiallyProcessedTags:initiallyProcessedTags
                          plainText:plainText
                precedingImageCount:&precedingImageCount];
+
+        if (([currentTagName isEqualToString:@"ul"] ||
+             [currentTagName isEqualToString:@"ol"]) &&
+            ongoingListTags.count > 0) {
+          [ongoingListTags removeLastObject];
+          if (ongoingListContextIds.count > 0) {
+            [ongoingListContextIds removeLastObject];
+          }
+        }
       }
       // post-tag cleanup
       closingTag = NO;
@@ -612,6 +837,7 @@
 
   // process tags into proper StyleType + StylePair values
   NSMutableArray *processedStyles = [[NSMutableArray alloc] init];
+  NSInteger blockquoteIndex = 0;
 
   for (NSArray *arr in initiallyProcessedTags) {
     NSString *tagName = (NSString *)arr[0];
@@ -769,6 +995,43 @@
       [styleArr addObject:@([H5Style getType])];
     } else if ([tagName isEqualToString:@"h6"]) {
       [styleArr addObject:@([H6Style getType])];
+    } else if ([tagName isEqualToString:@"li"]) {
+      NSString *listItemTag = [self listItemTagFromParams:params];
+      if (listItemTag == nil || [listItemTag isEqualToString:@"checkbox"]) {
+        continue;
+      }
+
+      NSInteger listLevel = [self listLevelFromParams:params];
+      NSInteger listContextId = [self listContextFromParams:params];
+      NSString *baseValue =
+          [listItemTag isEqualToString:@"ol"] ? @"EnrichedOrderedList"
+                                              : @"EnrichedUnorderedList";
+      NSNumber *styleType =
+          [listItemTag isEqualToString:@"ol"]
+              ? @([OrderedListStyle getType])
+              : @([UnorderedListStyle getType]);
+      NSString *continuationBaseValue =
+          [baseValue stringByAppendingString:@"Continuation"];
+      NSArray<NSValue *> *paragraphRanges =
+          [self paragraphRangesInListItemRange:tagRangeValue.rangeValue
+                                     plainText:plainText];
+
+      for (NSUInteger paragraphIndex = 0; paragraphIndex < paragraphRanges.count;
+           paragraphIndex++) {
+        NSMutableArray *listStyleArr = [[NSMutableArray alloc] init];
+        StylePair *listStylePair = [[StylePair alloc] init];
+        listStylePair.rangeValue = paragraphRanges[paragraphIndex];
+        listStylePair.styleValue =
+            [self listMarkerValueWithBase:(paragraphIndex == 0
+                                               ? baseValue
+                                               : continuationBaseValue)
+                                    level:listLevel
+                                contextId:listContextId];
+        [listStyleArr addObject:styleType];
+        [listStyleArr addObject:listStylePair];
+        [processedStyles addObject:listStyleArr];
+      }
+      continue;
     } else if ([tagName isEqualToString:@"ul"]) {
       if ([self isUlCheckboxList:params]) {
         [styleArr addObject:@([CheckboxListStyle getType])];
@@ -776,12 +1039,14 @@
             [self prepareCheckboxListStyleValue:tagRangeValue
                                  checkboxStates:checkboxStates];
       } else {
-        [styleArr addObject:@([UnorderedListStyle getType])];
+        continue;
       }
     } else if ([tagName isEqualToString:@"ol"]) {
-      [styleArr addObject:@([OrderedListStyle getType])];
+      continue;
     } else if ([tagName isEqualToString:@"blockquote"]) {
       [styleArr addObject:@([BlockQuoteStyle getType])];
+      stylePair.styleValue = [NSString
+          stringWithFormat:@"EnrichedBlockQuote:%ld", (long)blockquoteIndex++];
     } else if ([tagName isEqualToString:@"codeblock"]) {
       [styleArr addObject:@([CodeBlockStyle getType])];
     } else {

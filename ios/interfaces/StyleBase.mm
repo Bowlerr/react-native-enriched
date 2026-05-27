@@ -2,10 +2,35 @@
 #import "AttributeEntry.h"
 #import "OccurenceUtils.h"
 #import "RangeUtils.h"
-#import "TextListsUtils.h"
 #import "ZeroWidthSpaceUtils.h"
 
 @implementation StyleBase
+
+static BOOL EnrichedIsListMarker(NSString *markerFormat, NSString *baseValue) {
+  if (markerFormat == nullptr) {
+    return NO;
+  }
+
+  NSString *continuationBaseValue =
+      [baseValue stringByAppendingString:@"Continuation"];
+  return [markerFormat isEqualToString:baseValue] ||
+         [markerFormat hasPrefix:[baseValue stringByAppendingString:@":"]] ||
+         [markerFormat isEqualToString:continuationBaseValue] ||
+         [markerFormat
+             hasPrefix:[continuationBaseValue stringByAppendingString:@":"]];
+}
+
+static BOOL EnrichedShouldKeepParagraphMarkerWhenAdding(NSString *markerFormat,
+                                                        NSString *value) {
+  if ([markerFormat isEqualToString:value]) {
+    return NO;
+  }
+
+  return (EnrichedIsListMarker(markerFormat, @"EnrichedUnorderedList") &&
+          EnrichedIsListMarker(value, @"EnrichedUnorderedList")) ||
+         (EnrichedIsListMarker(markerFormat, @"EnrichedOrderedList") &&
+          EnrichedIsListMarker(value, @"EnrichedOrderedList"));
+}
 
 // This method gets overridden
 + (StyleType)getType {
@@ -100,10 +125,27 @@
                       [(NSParagraphStyle *)existingValue mutableCopy];
                   if (pStyle == nullptr)
                     return;
-                  pStyle.textLists =
-                      [TextListsUtils textListsByAdding:value
-                                    withExclusivePrefix:[self getMarkerPrefix]
-                                                toArray:pStyle.textLists];
+                  NSMutableArray<NSTextList *> *textLists =
+                      [pStyle.textLists mutableCopy];
+                  if (textLists == nullptr) {
+                    textLists = [[NSMutableArray alloc] init];
+                  }
+
+                  NSIndexSet *matchingIndexes = [textLists
+                      indexesOfObjectsPassingTest:^BOOL(NSTextList *textList,
+                                                        NSUInteger idx,
+                                                        BOOL *stop) {
+                        NSString *markerFormat = textList.markerFormat;
+                        return [self matchesParagraphMarker:markerFormat
+                                                      value:value] &&
+                               !EnrichedShouldKeepParagraphMarkerWhenAdding(
+                                   markerFormat, value);
+                      }];
+                  [textLists removeObjectsAtIndexes:matchingIndexes];
+                  [textLists addObject:[[NSTextList alloc]
+                                           initWithMarkerFormat:value
+                                                        options:0]];
+                  pStyle.textLists = textLists;
                   [self.host.textView.textStorage
                       addAttribute:NSParagraphStyleAttributeName
                              value:pStyle
@@ -138,10 +180,22 @@
                       [(NSParagraphStyle *)existingValue mutableCopy];
                   if (pStyle == nullptr)
                     return;
-                  pStyle.textLists =
-                      [TextListsUtils textListsByRemoving:[self getValue]
-                                               withPrefix:[self getMarkerPrefix]
-                                                fromArray:pStyle.textLists];
+                  NSMutableArray<NSTextList *> *textLists =
+                      [pStyle.textLists mutableCopy];
+                  if (textLists == nullptr) {
+                    textLists = [[NSMutableArray alloc] init];
+                  }
+
+                  NSIndexSet *matchingIndexes = [textLists
+                      indexesOfObjectsPassingTest:^BOOL(NSTextList *textList,
+                                                        NSUInteger idx,
+                                                        BOOL *stop) {
+                        return [self matchesParagraphMarker:textList
+                                                                .markerFormat
+                                                      value:[self getValue]];
+                      }];
+                  [textLists removeObjectsAtIndexes:matchingIndexes];
+                  pStyle.textLists = textLists;
                   [self.host.textView.textStorage
                       addAttribute:NSParagraphStyleAttributeName
                              value:pStyle
@@ -165,9 +219,23 @@
   } else {
     NSMutableParagraphStyle *pStyle =
         [newTypingAttrs[NSParagraphStyleAttributeName] mutableCopy];
-    pStyle.textLists = [TextListsUtils textListsByAdding:value
-                                     withExclusivePrefix:[self getMarkerPrefix]
-                                                 toArray:pStyle.textLists];
+    NSMutableArray<NSTextList *> *textLists = [pStyle.textLists mutableCopy];
+    if (textLists == nullptr) {
+      textLists = [[NSMutableArray alloc] init];
+    }
+
+    NSIndexSet *matchingIndexes = [textLists
+        indexesOfObjectsPassingTest:^BOOL(NSTextList *textList, NSUInteger idx,
+                                          BOOL *stop) {
+          NSString *markerFormat = textList.markerFormat;
+          return [self matchesParagraphMarker:markerFormat value:value] &&
+                 !EnrichedShouldKeepParagraphMarkerWhenAdding(markerFormat,
+                                                              value);
+        }];
+    [textLists removeObjectsAtIndexes:matchingIndexes];
+    [textLists addObject:[[NSTextList alloc] initWithMarkerFormat:value
+                                                          options:0]];
+    pStyle.textLists = textLists;
     newTypingAttrs[NSParagraphStyleAttributeName] = pStyle;
   }
 
@@ -186,10 +254,19 @@
   } else {
     NSMutableParagraphStyle *pStyle =
         [newTypingAttrs[NSParagraphStyleAttributeName] mutableCopy];
-    pStyle.textLists = pStyle.textLists =
-        [TextListsUtils textListsByRemoving:[self getValue]
-                                 withPrefix:[self getMarkerPrefix]
-                                  fromArray:pStyle.textLists];
+    NSMutableArray<NSTextList *> *textLists = [pStyle.textLists mutableCopy];
+    if (textLists == nullptr) {
+      textLists = [[NSMutableArray alloc] init];
+    }
+
+    NSIndexSet *matchingIndexes = [textLists
+        indexesOfObjectsPassingTest:^BOOL(NSTextList *textList, NSUInteger idx,
+                                          BOOL *stop) {
+          return [self matchesParagraphMarker:textList.markerFormat
+                                        value:[self getValue]];
+        }];
+    [textLists removeObjectsAtIndexes:matchingIndexes];
+    pStyle.textLists = textLists;
     newTypingAttrs[NSParagraphStyleAttributeName] = pStyle;
   }
 
@@ -205,9 +282,23 @@
            [valueString isEqualToString:[self getValue]];
   } else {
     NSParagraphStyle *pStyle = (NSParagraphStyle *)value;
-    return pStyle != nullptr && [TextListsUtils textLists:pStyle.textLists
-                                            containsValue:[self getValue]];
+    if (pStyle == nullptr) {
+      return NO;
+    }
+
+    for (NSTextList *textList in pStyle.textLists) {
+      if ([self matchesParagraphMarker:textList.markerFormat
+                                  value:[self getValue]]) {
+        return YES;
+      }
+    }
+    return NO;
   }
+}
+
+- (BOOL)matchesParagraphMarker:(NSString *)markerFormat
+                          value:(NSString *)value {
+  return markerFormat != nullptr && [markerFormat isEqualToString:value];
 }
 
 - (BOOL)detect:(NSRange)range {
