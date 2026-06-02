@@ -14,8 +14,7 @@ static BOOL EnrichedListMarkerMatches(NSString *markerFormat,
                                       NSString *baseValue) {
   return markerFormat != nullptr &&
          ([markerFormat isEqualToString:baseValue] ||
-          [markerFormat
-              hasPrefix:[baseValue stringByAppendingString:@":"]]);
+          [markerFormat hasPrefix:[baseValue stringByAppendingString:@":"]]);
 }
 
 static BOOL EnrichedLayoutListMarkerMatches(NSString *markerFormat,
@@ -35,17 +34,63 @@ static BOOL EnrichedLayoutListMarkerMatches(NSString *markerFormat,
 static BOOL EnrichedIsListContinuationMarker(NSString *markerFormat) {
   return markerFormat != nullptr &&
          ([markerFormat hasPrefix:@"EnrichedUnorderedListContinuation"] ||
-          [markerFormat hasPrefix:@"EnrichedOrderedListContinuation"]);
+          [markerFormat hasPrefix:@"EnrichedOrderedListContinuation"] ||
+          [markerFormat hasPrefix:@"EnrichedCheckboxContinuation"]);
+}
+
+static NSString *EnrichedMarkerByReplacingPrefix(NSString *markerFormat,
+                                                 NSString *sourcePrefix,
+                                                 NSString *targetPrefix) {
+  if (markerFormat == nil) {
+    return nil;
+  }
+
+  if ([markerFormat isEqualToString:sourcePrefix]) {
+    return targetPrefix;
+  }
+
+  NSString *sourcePrefixWithSeparator =
+      [sourcePrefix stringByAppendingString:@":"];
+  if (![markerFormat hasPrefix:sourcePrefixWithSeparator]) {
+    return nil;
+  }
+
+  NSString *suffix = [markerFormat substringFromIndex:sourcePrefix.length];
+  return [targetPrefix stringByAppendingString:suffix];
+}
+
+static NSString *EnrichedDrawableMarkerForContinuation(NSString *markerFormat) {
+  NSString *unorderedMarker = EnrichedMarkerByReplacingPrefix(
+      markerFormat, @"EnrichedUnorderedListContinuation",
+      @"EnrichedUnorderedList");
+  if (unorderedMarker != nil) {
+    return unorderedMarker;
+  }
+
+  NSString *orderedMarker = EnrichedMarkerByReplacingPrefix(
+      markerFormat, @"EnrichedOrderedListContinuation", @"EnrichedOrderedList");
+  if (orderedMarker != nil) {
+    return orderedMarker;
+  }
+
+  // Checkbox continuations need list indentation but must not draw a second
+  // box.
+  return nil;
 }
 
 static BOOL EnrichedAnyListMarkerMatches(NSString *markerFormat) {
   return EnrichedLayoutListMarkerMatches(markerFormat,
                                          @"EnrichedUnorderedList") ||
-         EnrichedLayoutListMarkerMatches(markerFormat, @"EnrichedOrderedList") ||
+         EnrichedLayoutListMarkerMatches(markerFormat,
+                                         @"EnrichedOrderedList") ||
          [markerFormat hasPrefix:@"EnrichedCheckbox"];
 }
 
 static NSInteger EnrichedListMarkerLevel(NSString *markerFormat) {
+  if (markerFormat == nil) {
+    return 0;
+  }
+
   NSRange separator = [markerFormat rangeOfString:@":"];
   if (separator.location == NSNotFound) {
     return 0;
@@ -53,6 +98,10 @@ static NSInteger EnrichedListMarkerLevel(NSString *markerFormat) {
   NSString *levelString =
       [markerFormat substringFromIndex:separator.location + separator.length];
   return MAX(0, [levelString integerValue]);
+}
+
+static BOOL EnrichedMarkerIsBlockQuote(NSString *markerFormat) {
+  return EnrichedLayoutListMarkerMatches(markerFormat, @"EnrichedBlockQuote");
 }
 
 static NSString *EnrichedDeepestListMarker(NSParagraphStyle *pStyle) {
@@ -75,18 +124,15 @@ static NSString *EnrichedDeepestListMarker(NSParagraphStyle *pStyle) {
 static NSString *EnrichedDeepestDrawableListMarker(NSParagraphStyle *pStyle) {
   NSString *markerFormat = nil;
   NSInteger markerLevel = -1;
-  BOOL blockQuoteBeforeMarker = NO;
 
   for (NSTextList *textList in pStyle.textLists) {
     NSString *candidate = textList.markerFormat;
-    if (EnrichedListMarkerMatches(candidate, @"EnrichedBlockQuote")) {
-      blockQuoteBeforeMarker = YES;
+    if (EnrichedMarkerIsBlockQuote(candidate)) {
       continue;
     }
 
     if (!EnrichedAnyListMarkerMatches(candidate) ||
-        EnrichedIsListContinuationMarker(candidate) ||
-        blockQuoteBeforeMarker) {
+        EnrichedIsListContinuationMarker(candidate)) {
       continue;
     }
 
@@ -99,6 +145,77 @@ static NSString *EnrichedDeepestDrawableListMarker(NSParagraphStyle *pStyle) {
   return markerFormat;
 }
 
+static NSString *
+EnrichedDeepestDrawableCheckboxMarker(NSParagraphStyle *pStyle) {
+  NSString *markerFormat = nil;
+  NSInteger markerLevel = -1;
+
+  for (NSTextList *textList in pStyle.textLists) {
+    NSString *candidate = textList.markerFormat;
+    if (![candidate hasPrefix:@"EnrichedCheckbox0"] &&
+        ![candidate hasPrefix:@"EnrichedCheckbox1"]) {
+      continue;
+    }
+
+    NSInteger candidateLevel = EnrichedListMarkerLevel(candidate);
+    if (candidateLevel >= markerLevel) {
+      markerFormat = candidate;
+      markerLevel = candidateLevel;
+    }
+  }
+
+  return markerFormat;
+}
+
+static NSString *
+EnrichedDeepestDrawableContinuationListMarker(NSParagraphStyle *pStyle) {
+  NSString *markerFormat = nil;
+  NSInteger markerLevel = -1;
+
+  for (NSTextList *textList in pStyle.textLists) {
+    NSString *candidate = textList.markerFormat;
+    if (EnrichedMarkerIsBlockQuote(candidate)) {
+      continue;
+    }
+
+    NSString *drawableCandidate =
+        EnrichedDrawableMarkerForContinuation(candidate);
+    if (drawableCandidate == nil) {
+      continue;
+    }
+
+    NSInteger candidateLevel = EnrichedListMarkerLevel(candidate);
+    if (candidateLevel >= markerLevel) {
+      markerFormat = candidate;
+      markerLevel = candidateLevel;
+    }
+  }
+
+  return markerFormat;
+}
+
+static BOOL EnrichedBlockQuotePrecedesMarker(NSParagraphStyle *pStyle,
+                                             NSString *targetMarkerFormat) {
+  if (pStyle == nil || targetMarkerFormat == nil) {
+    return NO;
+  }
+
+  BOOL hasSeenBlockQuote = NO;
+  for (NSTextList *textList in pStyle.textLists) {
+    NSString *candidate = textList.markerFormat;
+    if (EnrichedMarkerIsBlockQuote(candidate)) {
+      hasSeenBlockQuote = YES;
+      continue;
+    }
+
+    if (hasSeenBlockQuote && [candidate isEqualToString:targetMarkerFormat]) {
+      return YES;
+    }
+  }
+
+  return NO;
+}
+
 static CGFloat EnrichedListContentIndentForMarker(id<EnrichedViewHost> host,
                                                   NSString *markerFormat) {
   if (markerFormat == nil) {
@@ -106,8 +223,7 @@ static CGFloat EnrichedListContentIndentForMarker(id<EnrichedViewHost> host,
   }
 
   NSInteger level = EnrichedListMarkerLevel(markerFormat);
-  if (EnrichedLayoutListMarkerMatches(markerFormat,
-                                      @"EnrichedUnorderedList")) {
+  if (EnrichedLayoutListMarkerMatches(markerFormat, @"EnrichedUnorderedList")) {
     return [host.config unorderedListMarginLeft] * (level + 1) +
            [host.config unorderedListGapWidth];
   }
@@ -119,30 +235,94 @@ static CGFloat EnrichedListContentIndentForMarker(id<EnrichedViewHost> host,
 
   if ([markerFormat hasPrefix:@"EnrichedCheckbox"]) {
     return [host.config checkboxListMarginLeft] * (level + 1) +
-           [host.config checkboxListGapWidth];
+           [host.config checkboxListGapWidth] +
+           [host.config checkboxListBoxSize];
   }
 
   return 0.0;
 }
 
+static CGFloat
+EnrichedLayoutIndentNestedInsideBlockQuote(id<EnrichedViewHost> host,
+                                           NSParagraphStyle *pStyle) {
+  CGFloat indent = 0.0;
+  BOOL hasBlockQuote = NO;
+  BOOL hasSeenBlockQuote = NO;
+
+  for (NSTextList *textList in pStyle.textLists) {
+    NSString *markerFormat = textList.markerFormat;
+    if (EnrichedMarkerIsBlockQuote(markerFormat)) {
+      hasBlockQuote = YES;
+      hasSeenBlockQuote = YES;
+      continue;
+    }
+
+    if (!hasSeenBlockQuote) {
+      continue;
+    }
+
+    if (EnrichedAnyListMarkerMatches(markerFormat)) {
+      indent =
+          MAX(indent, EnrichedListContentIndentForMarker(host, markerFormat));
+    } else if ([markerFormat isEqualToString:@"EnrichedCodeBlock"]) {
+      indent = MAX(indent, 12.0);
+    }
+  }
+
+  return hasBlockQuote ? indent : 0.0;
+}
+
 static BOOL EnrichedParagraphHasBlockQuote(NSParagraphStyle *pStyle) {
   for (NSTextList *textList in pStyle.textLists) {
-    if (EnrichedListMarkerMatches(textList.markerFormat,
-                                  @"EnrichedBlockQuote")) {
+    if (EnrichedMarkerIsBlockQuote(textList.markerFormat)) {
       return YES;
     }
   }
   return NO;
 }
 
-static NSString *EnrichedBlockQuoteMarker(NSParagraphStyle *pStyle) {
+static CGFloat EnrichedBlockQuoteIndentForParagraph(id<EnrichedViewHost> host,
+                                                    NSParagraphStyle *pStyle) {
+  if (pStyle == nil) {
+    return 0.0;
+  }
+
+  NSInteger quoteLevel = -1;
   for (NSTextList *textList in pStyle.textLists) {
     NSString *markerFormat = textList.markerFormat;
-    if (EnrichedListMarkerMatches(markerFormat, @"EnrichedBlockQuote")) {
-      return markerFormat;
+    if (!EnrichedMarkerIsBlockQuote(markerFormat)) {
+      continue;
+    }
+    quoteLevel = MAX(quoteLevel, EnrichedListMarkerLevel(markerFormat));
+  }
+
+  if (quoteLevel < 0) {
+    return 0.0;
+  }
+
+  CGFloat indentUnit =
+      [host.config blockquoteBorderWidth] + [host.config blockquoteGapWidth];
+  return indentUnit * (quoteLevel + 1);
+}
+
+static NSString *EnrichedBlockQuoteMarker(NSParagraphStyle *pStyle) {
+  NSString *marker = nil;
+  NSInteger markerLevel = -1;
+
+  for (NSTextList *textList in pStyle.textLists) {
+    NSString *markerFormat = textList.markerFormat;
+    if (!EnrichedMarkerIsBlockQuote(markerFormat)) {
+      continue;
+    }
+
+    NSInteger currentLevel = EnrichedListMarkerLevel(markerFormat);
+    if (currentLevel >= markerLevel) {
+      marker = markerFormat;
+      markerLevel = currentLevel;
     }
   }
-  return nil;
+
+  return marker;
 }
 
 static BOOL EnrichedParagraphHasVisibleContent(NSString *text, NSRange range) {
@@ -155,10 +335,6 @@ static BOOL EnrichedParagraphHasVisibleContent(NSString *text, NSRange range) {
       [text substringWithRange:NSMakeRange(range.location, safeLength)];
   NSMutableString *normalized = [paragraph mutableCopy];
   [normalized replaceOccurrencesOfString:@"\u200B"
-                              withString:@""
-                                 options:0
-                                   range:NSMakeRange(0, normalized.length)];
-  [normalized replaceOccurrencesOfString:@"\uFFFC"
                               withString:@""
                                  options:0
                                    range:NSMakeRange(0, normalized.length)];
@@ -196,8 +372,7 @@ static NSRange EnrichedTrimDecorativeRangeEdges(NSString *text, NSRange range) {
 }
 
 static CGFloat EnrichedGlyphContainerX(NSLayoutManager *layoutManager,
-                                       CGRect lineRect,
-                                       CGRect lineUsedRect,
+                                       CGRect lineRect, CGRect lineUsedRect,
                                        NSUInteger glyphIndex) {
   CGPoint location = [layoutManager locationForGlyphAtIndex:glyphIndex];
   CGFloat x = lineRect.origin.x + location.x;
@@ -214,7 +389,36 @@ static CGFloat EnrichedGlyphContainerX(NSLayoutManager *layoutManager,
   return x;
 }
 
+static CGFloat
+EnrichedMeasuredWidthForGlyphRange(NSLayoutManager *layoutManager,
+                                   NSTextStorage *textStorage,
+                                   NSRange glyphRange) {
+  if (textStorage == nil || glyphRange.length == 0) {
+    return 0.0;
+  }
+
+  NSRange characterRange = [layoutManager characterRangeForGlyphRange:glyphRange
+                                                     actualGlyphRange:NULL];
+  if (characterRange.location == NSNotFound || characterRange.length == 0 ||
+      NSMaxRange(characterRange) > textStorage.length) {
+    return 0.0;
+  }
+
+  NSMutableAttributedString *lineSlice =
+      [[textStorage attributedSubstringFromRange:characterRange] mutableCopy];
+  NSRange trailingCharacterRange =
+      NSMakeRange(lineSlice.length > 0 ? lineSlice.length - 1 : 0, 1);
+  if (lineSlice.length > 0) {
+    [lineSlice removeAttribute:NSKernAttributeName
+                         range:trailingCharacterRange];
+  }
+
+  CGSize size = [lineSlice size];
+  return MAX(0.0, size.width);
+}
+
 static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
+                                            NSTextStorage *textStorage,
                                             NSTextContainer *textContainer,
                                             CGRect lineRect,
                                             CGRect lineUsedRect,
@@ -240,6 +444,12 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
                                    lastGlyphIndex + 1);
   }
 
+  CGFloat measuredWidth = EnrichedMeasuredWidthForGlyphRange(
+      layoutManager, textStorage, glyphRange);
+  if (measuredWidth > 0.0) {
+    maxX = minX + measuredWidth;
+  }
+
   CGFloat lineMinX = lineUsedRect.origin.x;
   CGFloat lineMaxX = CGRectGetMaxX(lineUsedRect);
   minX = MIN(MAX(minX, lineMinX), lineMaxX);
@@ -248,6 +458,30 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
   glyphRect.size.width = maxX - minX;
 
   return glyphRect;
+}
+
+static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
+                                           CGFloat leadingPadding,
+                                           CGFloat trailingPadding,
+                                           CGFloat verticalPadding) {
+  CGRect bgRect = glyphRect;
+  bgRect.origin.x -= leadingPadding;
+  bgRect.size.width += leadingPadding + trailingPadding;
+  bgRect = CGRectInset(bgRect, 0.0, -verticalPadding);
+  CGFloat lineInset = 2.0;
+  CGFloat minY = CGRectGetMinY(lineRect) + lineInset;
+  CGFloat maxY = CGRectGetMaxY(lineRect) - lineInset;
+  CGFloat maxHeight = MAX(1.0, maxY - minY);
+
+  if (bgRect.size.height > maxHeight) {
+    bgRect.size.height = maxHeight;
+    bgRect.origin.y = minY;
+  } else {
+    CGFloat centeredY = CGRectGetMidY(glyphRect) - (bgRect.size.height / 2.0);
+    bgRect.origin.y = MIN(MAX(centeredY, minY), maxY - bgRect.size.height);
+  }
+
+  return bgRect;
 }
 
 - (id)input {
@@ -300,7 +534,70 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
   [self drawBlockQuotes:host origin:origin visibleCharRange:visibleCharRange];
   [self drawCodeBlocks:host origin:origin visibleCharRange:visibleCharRange];
   [self drawInlineCodes:host origin:origin visibleCharRange:visibleCharRange];
+  [self drawMentions:host origin:origin visibleCharRange:visibleCharRange];
   [self drawLists:host origin:origin visibleCharRange:visibleCharRange];
+}
+
+- (void)drawTightInlineBackgroundForRange:(NSRange)characterRange
+                                    color:(UIColor *)bgColor
+                                   origin:(CGPoint)origin
+                           leadingPadding:(CGFloat)leadingPadding
+                          trailingPadding:(CGFloat)trailingPadding
+                          verticalPadding:(CGFloat)verticalPadding
+                                   radius:(CGFloat)radius
+                                     host:(id<EnrichedViewHost>)host {
+  NSRange trimmedRange = EnrichedTrimDecorativeRangeEdges(
+      host.textView.textStorage.string, characterRange);
+  if (trimmedRange.length == 0) {
+    return;
+  }
+
+  NSArray *nonNewlineRanges = [RangeUtils getNonNewlineRangesIn:host.textView
+                                                          range:trimmedRange];
+  for (NSValue *value in nonNewlineRanges) {
+    NSRange nonNewlineRange = [value rangeValue];
+    if (nonNewlineRange.length == 0) {
+      continue;
+    }
+
+    NSRange glyphRange = [self glyphRangeForCharacterRange:nonNewlineRange
+                                      actualCharacterRange:nullptr];
+    [self
+        enumerateLineFragmentsForGlyphRange:glyphRange
+                                 usingBlock:^(
+                                     CGRect rect, CGRect usedRect,
+                                     NSTextContainer *_Nonnull textContainer,
+                                     NSRange lineGlyphRange,
+                                     BOOL *_Nonnull stop) {
+                                   NSRange lineInlineGlyphRange =
+                                       NSIntersectionRange(glyphRange,
+                                                           lineGlyphRange);
+                                   if (lineInlineGlyphRange.length == 0) {
+                                     return;
+                                   }
+
+                                   CGRect glyphRect =
+                                       EnrichedTightGlyphRectForLine(
+                                           self, host.textView.textStorage,
+                                           textContainer, rect, usedRect,
+                                           lineInlineGlyphRange);
+                                   if (CGRectIsEmpty(glyphRect)) {
+                                     return;
+                                   }
+
+                                   CGRect bgRect = EnrichedInlineBackgroundRect(
+                                       glyphRect, rect, leadingPadding,
+                                       trailingPadding, verticalPadding);
+                                   bgRect =
+                                       CGRectOffset(bgRect, origin.x, origin.y);
+
+                                   UIBezierPath *path = [UIBezierPath
+                                       bezierPathWithRoundedRect:bgRect
+                                                    cornerRadius:radius];
+                                   [bgColor setFill];
+                                   [path fill];
+                                 }];
+  }
 }
 
 - (void)drawInlineCodes:(id<EnrichedViewHost>)host
@@ -314,70 +611,54 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
 
   UIColor *bgColor =
       [[host.config inlineCodeBgColor] colorWithAlphaIfNotTransparent:0.4];
-  CGFloat horizontalPadding = 3.0;
+  CGFloat leadingPadding = 5.0;
+  CGFloat trailingPadding = 3.0;
   CGFloat verticalPadding = 1.0;
   CGFloat radius = 4.0;
 
   for (StylePair *pair in [inlineCodeStyle all:visibleCharRange]) {
-    NSRange codeCharacterRange = EnrichedTrimDecorativeRangeEdges(
-        host.textView.textStorage.string, [pair.rangeValue rangeValue]);
-    if (codeCharacterRange.length == 0) {
+    [self drawTightInlineBackgroundForRange:[pair.rangeValue rangeValue]
+                                      color:bgColor
+                                     origin:origin
+                             leadingPadding:leadingPadding
+                            trailingPadding:trailingPadding
+                            verticalPadding:verticalPadding
+                                     radius:radius
+                                       host:host];
+  }
+}
+
+- (void)drawMentions:(id<EnrichedViewHost>)host
+              origin:(CGPoint)origin
+    visibleCharRange:(NSRange)visibleCharRange {
+  MentionStyle *mentionStyle = host.stylesDict[@([MentionStyle getType])];
+  if (mentionStyle == nullptr) {
+    return;
+  }
+
+  CGFloat padding = 3.0;
+  CGFloat verticalPadding = 1.0;
+  CGFloat radius = 4.0;
+
+  for (StylePair *pair in [mentionStyle all:visibleCharRange]) {
+    MentionParams *params = (MentionParams *)pair.styleValue;
+    if (params == nullptr) {
       continue;
     }
 
-    NSArray *nonNewlineRanges =
-        [RangeUtils getNonNewlineRangesIn:host.textView
-                                    range:codeCharacterRange];
-    for (NSValue *value in nonNewlineRanges) {
-      NSRange nonNewlineRange = [value rangeValue];
-      if (nonNewlineRange.length == 0) {
-        continue;
-      }
+    MentionStyleProps *styleProps =
+        [host.config mentionStylePropsForIndicator:params.indicator];
+    UIColor *bgColor =
+        [styleProps.backgroundColor colorWithAlphaIfNotTransparent:0.4];
 
-      NSRange codeGlyphRange =
-          [self glyphRangeForCharacterRange:nonNewlineRange
-                       actualCharacterRange:nullptr];
-      [self enumerateLineFragmentsForGlyphRange:codeGlyphRange
-                                     usingBlock:^(
-                                         CGRect rect, CGRect usedRect,
-                                         NSTextContainer *_Nonnull textContainer,
-                                         NSRange lineGlyphRange,
-                                         BOOL *_Nonnull stop) {
-                                       NSRange lineCodeGlyphRange =
-                                           NSIntersectionRange(codeGlyphRange,
-                                                               lineGlyphRange);
-                                       if (lineCodeGlyphRange.length == 0) {
-                                         return;
-                                       }
-
-                                       CGRect glyphRect =
-                                           EnrichedTightGlyphRectForLine(
-                                               self, textContainer, rect,
-                                               usedRect, lineCodeGlyphRange);
-                                       if (CGRectIsEmpty(glyphRect)) {
-                                         return;
-                                       }
-
-                                       CGRect bgRect =
-                                           CGRectInset(glyphRect,
-                                                       -horizontalPadding,
-                                                       -verticalPadding);
-                                       bgRect.origin.x = MAX(0.0,
-                                                            bgRect.origin.x);
-                                       bgRect.origin.y =
-                                           MAX(rect.origin.y, bgRect.origin.y);
-                                       bgRect = CGRectOffset(bgRect, origin.x,
-                                                            origin.y);
-
-                                       UIBezierPath *path =
-                                           [UIBezierPath
-                                               bezierPathWithRoundedRect:bgRect
-                                                            cornerRadius:
-                                                                radius];
-                                       [bgColor setFill];
-                                       [path fill];
-                                     }];
-    }
+    [self drawTightInlineBackgroundForRange:[pair.rangeValue rangeValue]
+                                      color:bgColor
+                                     origin:origin
+                             leadingPadding:padding
+                            trailingPadding:padding
+                            verticalPadding:verticalPadding
+                                     radius:radius
+                                       host:host];
   }
 }
 
@@ -414,20 +695,18 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
                                  usingBlock:^(
                                      CGRect rect, CGRect usedRect,
                                      NSTextContainer *_Nonnull textContainer,
-                                     NSRange glyphRange,
-                                     BOOL *_Nonnull stop) {
+                                     NSRange glyphRange, BOOL *_Nonnull stop) {
                                    CGFloat horizontalPadding = 12.0;
                                    CGFloat verticalPadding = 6.0;
-                                   CGFloat minX = MAX(
-                                       0.0,
-                                       usedRect.origin.x - horizontalPadding);
+                                   CGFloat minX =
+                                       MAX(0.0, usedRect.origin.x -
+                                                    horizontalPadding);
                                    CGRect lineBgRect = CGRectMake(
                                        origin.x + minX,
                                        origin.y + usedRect.origin.y -
                                            verticalPadding,
-                                       MAX(1.0,
-                                           textContainer.size.width - minX -
-                                               horizontalPadding),
+                                       MAX(1.0, textContainer.size.width -
+                                                    minX - horizontalPadding),
                                        usedRect.size.height +
                                            verticalPadding * 2);
 
@@ -438,9 +717,8 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
                                  }];
 
     if (!CGRectIsNull(blockRect)) {
-      UIBezierPath *path =
-          [UIBezierPath bezierPathWithRoundedRect:blockRect
-                                     cornerRadius:radius];
+      UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:blockRect
+                                                      cornerRadius:radius];
       path.lineWidth = 1.0 / UIScreen.mainScreen.scale;
       [bgColor setFill];
       [path fill];
@@ -509,9 +787,8 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
     NSRange nextRange = [nextPair.rangeValue rangeValue];
     NSString *nextMarker =
         EnrichedBlockQuoteMarker((NSParagraphStyle *)nextPair.styleValue);
-    BOOL sameBlockQuote =
-        (currentMarker == nil && nextMarker == nil) ||
-        [currentMarker isEqualToString:nextMarker];
+    BOOL sameBlockQuote = (currentMarker == nil && nextMarker == nil) ||
+                          [currentMarker isEqualToString:nextMarker];
 
     if (NSMaxRange(currentRange) == nextRange.location && sameBlockQuote) {
       currentRange.length += nextRange.length;
@@ -548,33 +825,49 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
     return;
   }
 
-  void (^drawQuoteRail)(CGRect, CGFloat, CGFloat) =
-      ^(CGRect quoteRect, CGFloat topPadding, CGFloat bottomPadding) {
-    CGFloat borderWidth = [host.config blockquoteBorderWidth];
-    CGFloat x =
-        origin.x + quoteRect.origin.x - [host.config blockquoteGapWidth] -
-        borderWidth;
-    CGRect lineRect =
-        CGRectMake(x, origin.y + quoteRect.origin.y - topPadding, borderWidth,
-                   quoteRect.size.height + topPadding + bottomPadding);
-    [[host.config blockquoteBorderColor] setFill];
-    UIRectFill(lineRect);
-  };
+  void (^drawQuoteRail)(CGRect, CGFloat, CGFloat, CGFloat) =
+      ^(CGRect quoteRect, CGFloat railX, CGFloat topPadding,
+        CGFloat bottomPadding) {
+        CGFloat borderWidth = [host.config blockquoteBorderWidth];
+        [[host.config blockquoteBorderColor] setFill];
+        CGRect lineRect = CGRectMake(
+            origin.x + railX, origin.y + quoteRect.origin.y - topPadding,
+            borderWidth, quoteRect.size.height + topPadding + bottomPadding);
+        UIRectFill(lineRect);
+      };
 
-  NSMutableArray<NSValue *> *quoteRects = [[NSMutableArray alloc] init];
-  __block NSString *currentMarker = nil;
-  __block CGRect currentQuoteRect = CGRectNull;
+  NSMutableArray<NSDictionary *> *quoteRailSegments =
+      [[NSMutableArray alloc] init];
+  NSMutableDictionary<NSNumber *, NSMutableDictionary *> *activeRailSegments =
+      [[NSMutableDictionary alloc] init];
 
-  void (^flushCurrentQuote)(void) = ^{
-    if (!CGRectIsNull(currentQuoteRect)) {
-      [quoteRects addObject:[NSValue valueWithCGRect:currentQuoteRect]];
+  void (^flushRail)(NSNumber *) = ^(NSNumber *railLevel) {
+    NSMutableDictionary *railSegment = activeRailSegments[railLevel];
+    if (railSegment != nil) {
+      [quoteRailSegments addObject:[railSegment copy]];
+      [activeRailSegments removeObjectForKey:railLevel];
     }
-    currentQuoteRect = CGRectNull;
-    currentMarker = nil;
   };
 
-  NSArray *paragraphs = [RangeUtils getSeparateParagraphsRangesIn:host.textView
-                                                            range:visibleCharRange];
+  void (^flushRailsDeeperThan)(NSInteger) = ^(NSInteger quoteLevel) {
+    NSArray<NSNumber *> *activeLevels = [activeRailSegments allKeys];
+    for (NSNumber *railLevel in activeLevels) {
+      if ([railLevel integerValue] > quoteLevel) {
+        flushRail(railLevel);
+      }
+    }
+  };
+
+  void (^flushAllRails)(void) = ^{
+    NSArray<NSNumber *> *activeLevels = [activeRailSegments allKeys];
+    for (NSNumber *railLevel in activeLevels) {
+      flushRail(railLevel);
+    }
+  };
+
+  NSArray *paragraphs =
+      [RangeUtils getSeparateParagraphsRangesIn:host.textView
+                                          range:visibleCharRange];
   for (NSValue *paragraph in paragraphs) {
     NSRange paragraphRange = [paragraph rangeValue];
     if (paragraphRange.location >= textStorage.length) {
@@ -585,18 +878,14 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
         MIN(paragraphRange.location, textStorage.length - 1);
     NSParagraphStyle *paragraphStyle =
         [textStorage attribute:NSParagraphStyleAttributeName
-                        atIndex:styleIndex
-                 effectiveRange:nil];
+                       atIndex:styleIndex
+                effectiveRange:nil];
     NSString *quoteMarker = EnrichedBlockQuoteMarker(paragraphStyle);
     if (quoteMarker == nil) {
-      flushCurrentQuote();
+      flushAllRails();
       continue;
     }
-
-    if (currentMarker != nil && ![currentMarker isEqualToString:quoteMarker]) {
-      flushCurrentQuote();
-    }
-    currentMarker = quoteMarker;
+    NSInteger currentQuoteLevel = EnrichedListMarkerLevel(quoteMarker);
 
     if (!EnrichedParagraphHasVisibleContent(text, paragraphRange)) {
       continue;
@@ -607,82 +896,169 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
                      actualCharacterRange:nullptr];
     __block CGRect paragraphRect = CGRectNull;
 
-    [self enumerateLineFragmentsForGlyphRange:paragraphGlyphRange
-                                   usingBlock:^(
-                                       CGRect rect, CGRect usedRect,
-                                       NSTextContainer *_Nonnull textContainer,
-                                       NSRange glyphRange,
-                                       BOOL *_Nonnull stop) {
-                                     NSUInteger charIdx =
-                                         [self characterIndexForGlyphAtIndex:
-                                                   glyphRange.location];
-                                     if (charIdx >= textStorage.length) {
-                                       charIdx = textStorage.length - 1;
-                                     }
-                                     UIFont *font =
-                                         [textStorage attribute:NSFontAttributeName
-                                                       atIndex:charIdx
-                                                effectiveRange:nil];
-                                     NSParagraphStyle *lineParagraphStyle =
-                                         [textStorage
-                                              attribute:
-                                                  NSParagraphStyleAttributeName
-                                                atIndex:charIdx
-                                         effectiveRange:nil];
-                                     CGRect textRect =
-                                         [self getTextAlignedUsedRect:usedRect
-                                                                 font:font];
-                                     CGFloat listIndent =
-                                         EnrichedListContentIndentForMarker(
-                                             host,
-                                             EnrichedDeepestListMarker(
-                                                 lineParagraphStyle));
-                                     if (listIndent > 0.0) {
-                                       CGFloat adjustedX =
-                                           MAX(0.0,
-                                               textRect.origin.x - listIndent);
-                                       textRect.size.width +=
-                                           textRect.origin.x - adjustedX;
-                                       textRect.origin.x = adjustedX;
-                                     }
-                                     paragraphRect =
-                                         CGRectIsNull(paragraphRect)
-                                             ? textRect
-                                             : CGRectUnion(paragraphRect,
-                                                           textRect);
-                                   }];
+    [self
+        enumerateLineFragmentsForGlyphRange:paragraphGlyphRange
+                                 usingBlock:^(
+                                     CGRect rect, CGRect usedRect,
+                                     NSTextContainer *_Nonnull textContainer,
+                                     NSRange glyphRange, BOOL *_Nonnull stop) {
+                                   NSUInteger charIdx =
+                                       [self characterIndexForGlyphAtIndex:
+                                                 glyphRange.location];
+                                   if (charIdx >= textStorage.length) {
+                                     charIdx = textStorage.length - 1;
+                                   }
+                                   UIFont *font = [textStorage
+                                            attribute:NSFontAttributeName
+                                              atIndex:charIdx
+                                       effectiveRange:nil];
+                                   NSParagraphStyle *lineParagraphStyle =
+                                       [textStorage
+                                                attribute:
+                                                    NSParagraphStyleAttributeName
+                                                  atIndex:charIdx
+                                           effectiveRange:nil];
+                                   CGRect textRect =
+                                       [self getTextAlignedUsedRect:usedRect
+                                                               font:font];
+                                   CGFloat listIndent =
+                                       EnrichedLayoutIndentNestedInsideBlockQuote(
+                                           host, lineParagraphStyle);
+                                   if (listIndent > 0.0) {
+                                     CGFloat adjustedX = MAX(
+                                         0.0, textRect.origin.x - listIndent);
+                                     textRect.size.width +=
+                                         textRect.origin.x - adjustedX;
+                                     textRect.origin.x = adjustedX;
+                                   }
+                                   textRect.origin.y = rect.origin.y;
+                                   textRect.size.height = rect.size.height;
+                                   paragraphRect =
+                                       CGRectIsNull(paragraphRect)
+                                           ? textRect
+                                           : CGRectUnion(paragraphRect,
+                                                         textRect);
+                                 }];
 
     if (!CGRectIsNull(paragraphRect)) {
-      currentQuoteRect = CGRectIsNull(currentQuoteRect)
-                             ? paragraphRect
-                             : CGRectUnion(currentQuoteRect, paragraphRect);
+      flushRailsDeeperThan(currentQuoteLevel);
+
+      CGFloat borderWidth = [host.config blockquoteBorderWidth];
+      CGFloat indentUnit = borderWidth + [host.config blockquoteGapWidth];
+      for (NSInteger railLevel = 0; railLevel <= currentQuoteLevel;
+           railLevel++) {
+        CGFloat distanceFromContent =
+            indentUnit * (currentQuoteLevel + 1 - railLevel);
+        CGFloat railX = paragraphRect.origin.x - distanceFromContent;
+        NSNumber *railKey = @(railLevel);
+        NSMutableDictionary *activeSegment = activeRailSegments[railKey];
+        BOOL shouldMerge = NO;
+
+        if (activeSegment != nil) {
+          CGFloat activeX = [activeSegment[@"x"] doubleValue];
+          NSInteger previousQuoteLevel =
+              [activeSegment[@"lastQuoteLevel"] integerValue];
+          NSString *previousMarker = activeSegment[@"marker"];
+          BOOL markerChanged = previousMarker != nil &&
+                               ![previousMarker isEqualToString:quoteMarker];
+          BOOL siblingQuoteBoundary =
+              markerChanged && previousQuoteLevel == currentQuoteLevel;
+          CGFloat railDelta =
+              activeX > railX ? activeX - railX : railX - activeX;
+          shouldMerge = railDelta < 0.5 && !siblingQuoteBoundary;
+        }
+
+        if (!shouldMerge) {
+          flushRail(railKey);
+          activeSegment = [@{
+            @"rect" : [NSValue valueWithCGRect:paragraphRect],
+            @"x" : @(railX),
+            @"marker" : quoteMarker,
+            @"lastQuoteLevel" : @(currentQuoteLevel)
+          } mutableCopy];
+          activeRailSegments[railKey] = activeSegment;
+          continue;
+        }
+
+        CGRect activeRect = [activeSegment[@"rect"] CGRectValue];
+        activeSegment[@"rect"] =
+            [NSValue valueWithCGRect:CGRectUnion(activeRect, paragraphRect)];
+        activeSegment[@"marker"] = quoteMarker;
+        activeSegment[@"lastQuoteLevel"] = @(currentQuoteLevel);
+      }
     }
   }
 
-  flushCurrentQuote();
+  flushAllRails();
 
-  CGFloat desiredVerticalPadding = 6.0;
-  CGFloat minimumSplitGap = 2.0;
-  for (NSUInteger i = 0; i < quoteRects.count; i++) {
-    CGRect quoteRect = [quoteRects[i] CGRectValue];
-    CGFloat topPadding = desiredVerticalPadding;
-    CGFloat bottomPadding = desiredVerticalPadding;
-
-    if (i > 0) {
-      CGRect previousRect = [quoteRects[i - 1] CGRectValue];
-      CGFloat previousGap = quoteRect.origin.y - CGRectGetMaxY(previousRect);
-      topPadding =
-          MAX(0.0, MIN(topPadding, previousGap / 2.0 - minimumSplitGap));
-    }
-    if (i + 1 < quoteRects.count) {
-      CGRect nextRect = [quoteRects[i + 1] CGRectValue];
-      CGFloat nextGap = nextRect.origin.y - CGRectGetMaxY(quoteRect);
-      bottomPadding =
-          MAX(0.0, MIN(bottomPadding, nextGap / 2.0 - minimumSplitGap));
-    }
-
-    drawQuoteRail(quoteRect, topPadding, bottomPadding);
+  CGFloat desiredVerticalPadding = 4.0;
+  for (NSDictionary *quoteSegment in quoteRailSegments) {
+    CGRect quoteRect = [quoteSegment[@"rect"] CGRectValue];
+    CGFloat railX = [quoteSegment[@"x"] doubleValue];
+    drawQuoteRail(quoteRect, railX, desiredVerticalPadding,
+                  desiredVerticalPadding);
   }
+}
+
+- (NSUInteger)previousDrawableListCharIndexForHost:(id<EnrichedViewHost>)host
+                                         charIndex:(NSUInteger)index
+                                      markerFormat:(NSString *)markerFormat {
+  if (markerFormat == nil) {
+    return NSNotFound;
+  }
+
+  NSString *fullText = host.textView.textStorage.string;
+  NSRange currentParagraph =
+      [fullText paragraphRangeForRange:NSMakeRange(index, 0)];
+  if (currentParagraph.location == 0) {
+    return NSNotFound;
+  }
+
+  NSInteger currentLevel = EnrichedListMarkerLevel(markerFormat);
+  NSUInteger recentParagraphLocation =
+      [fullText
+          paragraphRangeForRange:NSMakeRange(currentParagraph.location - 1, 0)]
+          .location;
+
+  while (true) {
+    NSRange previousParagraphRange = [fullText
+        paragraphRangeForRange:NSMakeRange(recentParagraphLocation, 0)];
+    if (!EnrichedParagraphHasVisibleContent(fullText, previousParagraphRange)) {
+      break;
+    }
+
+    NSString *previousMarker =
+        [self deepestListMarkerForHost:host charIndex:recentParagraphLocation];
+    NSString *previousLayoutMarker =
+        [self deepestLayoutListMarkerForHost:host
+                                   charIndex:recentParagraphLocation];
+
+    if (previousMarker != nil) {
+      if ([previousMarker isEqualToString:markerFormat]) {
+        return recentParagraphLocation;
+      }
+
+      if (EnrichedListMarkerLevel(previousMarker) < currentLevel) {
+        break;
+      }
+    } else if (!(previousLayoutMarker != nil &&
+                 EnrichedIsListContinuationMarker(previousLayoutMarker) &&
+                 EnrichedListMarkerLevel(previousLayoutMarker) >=
+                     currentLevel)) {
+      break;
+    }
+
+    if (recentParagraphLocation == 0) {
+      break;
+    }
+
+    recentParagraphLocation =
+        [fullText
+            paragraphRangeForRange:NSMakeRange(recentParagraphLocation - 1, 0)]
+            .location;
+  }
+
+  return NSNotFound;
 }
 
 - (void)drawLists:(id<EnrichedViewHost>)host
@@ -695,14 +1071,14 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
 
   NSMutableArray *allLists = [[NSMutableArray alloc] init];
 
+  if (cbStyle != nullptr) {
+    [allLists addObjectsFromArray:[cbStyle all:visibleCharRange]];
+  }
   if (ulStyle != nullptr) {
     [allLists addObjectsFromArray:[ulStyle all:visibleCharRange]];
   }
   if (olStyle != nullptr) {
     [allLists addObjectsFromArray:[olStyle all:visibleCharRange]];
-  }
-  if (cbStyle != nullptr) {
-    [allLists addObjectsFromArray:[cbStyle all:visibleCharRange]];
   }
 
   NSMutableSet<NSString *> *drawnParagraphs = [[NSMutableSet alloc] init];
@@ -737,6 +1113,7 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
       NSRange paragraphGlyphRange =
           [self glyphRangeForCharacterRange:paragraphRange
                        actualCharacterRange:nullptr];
+      __block BOOL didDrawMarker = NO;
 
       [self
           enumerateLineFragmentsForGlyphRange:paragraphGlyphRange
@@ -753,48 +1130,98 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
                                          effectiveRange:nil];
                                      NSParagraphStyle *lineParagraphStyle =
                                          [host.textView.textStorage
-                                              attribute:
-                                                  NSParagraphStyleAttributeName
-                                                atIndex:charIdx
-                                         effectiveRange:nil];
+                                                  attribute:
+                                                      NSParagraphStyleAttributeName
+                                                    atIndex:charIdx
+                                             effectiveRange:nil];
                                      CGRect textUsedRect =
                                          [self getTextAlignedUsedRect:usedRect
                                                                  font:font];
                                      CGRect markerUsedRect = textUsedRect;
                                      CGFloat markerIndent = indent;
                                      if (lineParagraphStyle != nullptr) {
-                                       markerIndent =
-                                           [lineParagraphStyle firstLineHeadIndent];
-                                     }
-                                     if (EnrichedParagraphHasBlockQuote(
-                                             lineParagraphStyle)) {
-                                       markerUsedRect.origin.x -=
-                                           [host.config blockquoteBorderWidth] +
-                                           [host.config blockquoteGapWidth];
+                                       markerIndent = [lineParagraphStyle
+                                           firstLineHeadIndent];
                                      }
 
+                                     NSParagraphStyle *effectiveParagraphStyle =
+                                         lineParagraphStyle ?: pStyle;
+                                     NSString *checkboxMarkerFormat =
+                                         EnrichedDeepestDrawableCheckboxMarker(
+                                             effectiveParagraphStyle);
+                                     NSString *layoutMarkerFormat =
+                                         checkboxMarkerFormat
+                                             ?: EnrichedDeepestListMarker(
+                                                    effectiveParagraphStyle);
                                      NSString *markerFormat =
-                                         EnrichedDeepestDrawableListMarker(
-                                             lineParagraphStyle ?: pStyle);
+                                         checkboxMarkerFormat
+                                             ?: EnrichedDeepestDrawableListMarker(
+                                                    effectiveParagraphStyle);
+                                     BOOL drawsContinuationQuoteMarker = NO;
+                                     if (markerFormat == nil &&
+                                         EnrichedParagraphHasBlockQuote(
+                                             effectiveParagraphStyle)) {
+                                       layoutMarkerFormat =
+                                           EnrichedDeepestDrawableContinuationListMarker(
+                                               effectiveParagraphStyle);
+                                       markerFormat =
+                                           EnrichedDrawableMarkerForContinuation(
+                                               layoutMarkerFormat);
+                                       drawsContinuationQuoteMarker =
+                                           markerFormat != nil;
+                                     }
                                      if (markerFormat == nil) {
                                        *stop = YES;
                                        return;
                                      }
 
+                                     if (drawsContinuationQuoteMarker) {
+                                       markerIndent = MAX(
+                                           0.0,
+                                           markerIndent -
+                                               EnrichedBlockQuoteIndentForParagraph(
+                                                   host,
+                                                   effectiveParagraphStyle));
+                                     }
+
+                                     if (EnrichedBlockQuotePrecedesMarker(
+                                             lineParagraphStyle,
+                                             drawsContinuationQuoteMarker
+                                                 ? layoutMarkerFormat
+                                                 : markerFormat)) {
+                                       markerUsedRect.origin.x -=
+                                           [host.config blockquoteBorderWidth] +
+                                           [host.config blockquoteGapWidth];
+                                     }
+
                                      if ([markerFormat
                                              hasPrefix:
                                                  @"EnrichedOrderedList"]) {
+                                       NSUInteger markerCharIdx = charIdx;
+                                       if (drawsContinuationQuoteMarker) {
+                                         NSUInteger previousCharIdx = [self
+                                             previousDrawableListCharIndexForHost:
+                                                 host
+                                                                        charIndex:
+                                                                            charIdx
+                                                                     markerFormat:
+                                                                         markerFormat];
+                                         if (previousCharIdx != NSNotFound) {
+                                           markerCharIdx = previousCharIdx;
+                                         }
+                                       }
                                        NSString *marker = [self
                                            getDecimalMarkerForList:host
-                                                        charIndex:charIdx
-                                                     markerFormat:markerFormat
-                                                        listRange:listRange];
+                                                         charIndex:markerCharIdx
+                                                      markerFormat:markerFormat
+                                                         listRange:listRange];
                                        [self drawDecimal:host
                                                      marker:marker
                                            markerAttributes:markerAttributes
                                                      origin:origin
                                                    usedRect:markerUsedRect
                                                      indent:markerIndent];
+                                       didDrawMarker = YES;
                                      } else if ([markerFormat
                                                     hasPrefix:
                                                         @"EnrichedUnorderedLis"
@@ -804,6 +1231,7 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
                                                  origin:origin
                                                usedRect:markerUsedRect
                                                  indent:markerIndent];
+                                       didDrawMarker = YES;
                                      } else if ([markerFormat
                                                     hasPrefix:
                                                         @"EnrichedCheckbox"]) {
@@ -812,12 +1240,15 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
                                                    origin:origin
                                                  usedRect:markerUsedRect
                                                    indent:markerIndent];
+                                       didDrawMarker = YES;
                                      }
                                      // only first line of a list gets its
                                      // marker drawn
                                      *stop = YES;
                                    }];
-      [drawnParagraphs addObject:paragraphKey];
+      if (didDrawMarker) {
+        [drawnParagraphs addObject:paragraphKey];
+      }
     }
   }
 }
@@ -825,7 +1256,7 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
 - (NSString *)getDecimalMarkerForList:(id<EnrichedViewHost>)host
                             charIndex:(NSUInteger)index
                          markerFormat:(NSString *)markerFormat
-                             listRange:(NSRange)listRange {
+                            listRange:(NSRange)listRange {
   (void)listRange;
   NSString *fullText = host.textView.textStorage.string;
   NSInteger itemNumber = 1;
@@ -850,7 +1281,8 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
       }
 
       NSString *previousMarker =
-          [self deepestListMarkerForHost:host charIndex:recentParagraphLocation];
+          [self deepestListMarkerForHost:host
+                               charIndex:recentParagraphLocation];
       NSString *previousLayoutMarker =
           [self deepestLayoutListMarkerForHost:host
                                      charIndex:recentParagraphLocation];
@@ -873,11 +1305,11 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
         if ([previousMarker isEqualToString:markerFormat]) {
           prevParagraphsCount += 1;
         } else if (previousLevel > currentLevel) {
-          // Nested list content belongs to the previous same-level item. Skip it
-          // while counting siblings at the current ordered-list level.
+          // Nested list content belongs to the previous same-level item. Skip
+          // it while counting siblings at the current ordered-list level.
         } else if (previousIsOrdered && previousLevel == currentLevel) {
-          // Same depth but a different ordered-list marker means a distinct list
-          // context, so numbering should restart.
+          // Same depth but a different ordered-list marker means a distinct
+          // list context, so numbering should restart.
           break;
         } else {
           break;
@@ -909,8 +1341,8 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
 
   NSParagraphStyle *pStyle =
       [host.textView.textStorage attribute:NSParagraphStyleAttributeName
-                                    atIndex:index
-                             effectiveRange:nil];
+                                   atIndex:index
+                            effectiveRange:nil];
   if (pStyle == nullptr) {
     return nil;
   }
@@ -926,8 +1358,8 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
 
   NSParagraphStyle *pStyle =
       [host.textView.textStorage attribute:NSParagraphStyleAttributeName
-                                    atIndex:index
-                             effectiveRange:nil];
+                                   atIndex:index
+                            effectiveRange:nil];
   if (pStyle == nullptr) {
     return nil;
   }
@@ -953,19 +1385,64 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
               origin:(CGPoint)origin
             usedRect:(CGRect)usedRect
               indent:(CGFloat)indent {
-  BOOL isChecked = [markerFormat isEqualToString:@"EnrichedCheckbox1"];
+  BOOL isChecked = [markerFormat hasPrefix:@"EnrichedCheckbox1"];
 
   UIImage *image = isChecked ? host.config.checkboxCheckedImage
                              : host.config.checkboxUncheckedImage;
   CGFloat gapWidth = [host.config checkboxListGapWidth];
   CGFloat configuredBoxSize = [host.config checkboxListBoxSize];
+  if (configuredBoxSize <= 0.0) {
+    configuredBoxSize = MAX(12.0, usedRect.size.height * 0.8);
+  }
 
-  CGFloat boxSize = MIN(configuredBoxSize, usedRect.size.height);
+  CGFloat boxSize = MIN(configuredBoxSize, MAX(1.0, usedRect.size.height));
   CGFloat centerY = CGRectGetMidY(usedRect) + origin.y;
   CGFloat boxX = origin.x + indent - gapWidth - boxSize;
   CGFloat boxY = centerY - boxSize / 2.0;
+  CGRect boxRect = CGRectMake(boxX, boxY, boxSize, boxSize);
 
-  [image drawInRect:CGRectMake(boxX, boxY, boxSize, boxSize)];
+  if (image != nil && image.size.width > 0.0 && image.size.height > 0.0) {
+    [image drawInRect:boxRect];
+    return;
+  }
+
+  CGContextRef context = UIGraphicsGetCurrentContext();
+  if (context == nil) {
+    return;
+  }
+
+  UIColor *boxColor =
+      [host.config checkboxListBoxColor] ?: [UIColor blackColor];
+  CGFloat strokeWidth = MAX(1.5, boxSize * 0.1);
+  CGRect insetRect = CGRectInset(boxRect, strokeWidth / 2.0, strokeWidth / 2.0);
+  CGFloat cornerRadius = MAX(2.0, boxSize * 0.16);
+  UIBezierPath *boxPath = [UIBezierPath bezierPathWithRoundedRect:insetRect
+                                                     cornerRadius:cornerRadius];
+  boxPath.lineWidth = strokeWidth;
+
+  CGContextSaveGState(context);
+  [boxColor setStroke];
+  if (isChecked) {
+    [boxColor setFill];
+    [boxPath fill];
+    [[UIColor whiteColor] setStroke];
+    UIBezierPath *checkPath = [UIBezierPath bezierPath];
+    checkPath.lineWidth = MAX(2.0, boxSize * 0.12);
+    checkPath.lineCapStyle = kCGLineCapRound;
+    checkPath.lineJoinStyle = kCGLineJoinRound;
+    [checkPath moveToPoint:CGPointMake(CGRectGetMinX(boxRect) + boxSize * 0.25,
+                                       CGRectGetMidY(boxRect))];
+    [checkPath
+        addLineToPoint:CGPointMake(CGRectGetMinX(boxRect) + boxSize * 0.43,
+                                   CGRectGetMinY(boxRect) + boxSize * 0.66)];
+    [checkPath
+        addLineToPoint:CGPointMake(CGRectGetMinX(boxRect) + boxSize * 0.76,
+                                   CGRectGetMinY(boxRect) + boxSize * 0.32)];
+    [checkPath stroke];
+  } else {
+    [boxPath stroke];
+  }
+  CGContextRestoreGState(context);
 }
 
 - (void)drawBullet:(id<EnrichedViewHost>)host
@@ -993,8 +1470,8 @@ static CGRect EnrichedTightGlyphRectForLine(NSLayoutManager *layoutManager,
       CGContextStrokePath(context);
     } else if (level >= 2) {
       CGFloat side = bulletSize * 0.8;
-      CGRect squareRect = CGRectMake(bulletX - side / 2, centerY - side / 2,
-                                     side, side);
+      CGRect squareRect =
+          CGRectMake(bulletX - side / 2, centerY - side / 2, side, side);
       CGContextFillRect(context, squareRect);
     } else {
       CGContextAddArc(context, bulletX, centerY, bulletSize / 2, 0, 2 * M_PI,

@@ -55,14 +55,38 @@ static NSInteger EnrichedListLevelInParagraph(NSParagraphStyle *pStyle,
   return level;
 }
 
-static BOOL EnrichedParagraphHasBlockQuote(NSParagraphStyle *pStyle) {
+static NSInteger EnrichedParagraphBlockQuoteLevel(NSParagraphStyle *pStyle) {
+  NSInteger level = -1;
   for (NSTextList *textList in pStyle.textLists) {
-    if (EnrichedListMarkerMatches(textList.markerFormat,
-                                  @"EnrichedBlockQuote")) {
-      return YES;
+    NSInteger markerLevel = EnrichedListLevelFromMarker(textList.markerFormat,
+                                                        @"EnrichedBlockQuote");
+    if (markerLevel > level) {
+      level = markerLevel;
     }
   }
-  return NO;
+  return level;
+}
+
+static NSString *EnrichedListMarkerFromStylePair(StylePair *pair,
+                                                 NSString *baseValue) {
+  if ([pair.styleValue isKindOfClass:[NSString class]]) {
+    NSString *markerFormat = (NSString *)pair.styleValue;
+    if (EnrichedListMarkerMatches(markerFormat, baseValue)) {
+      return markerFormat;
+    }
+  }
+
+  if ([pair.styleValue isKindOfClass:[NSParagraphStyle class]]) {
+    NSParagraphStyle *pStyle = (NSParagraphStyle *)pair.styleValue;
+    for (NSTextList *textList in pStyle.textLists) {
+      NSString *markerFormat = textList.markerFormat;
+      if (EnrichedListMarkerMatches(markerFormat, baseValue)) {
+        return markerFormat;
+      }
+    }
+  }
+
+  return baseValue;
 }
 
 @implementation OrderedListStyle
@@ -99,10 +123,14 @@ static BOOL EnrichedParagraphHasBlockQuote(NSParagraphStyle *pStyle) {
                     [(NSParagraphStyle *)value mutableCopy];
                 NSInteger level =
                     EnrichedListLevelInParagraph(pStyle, [self getValue]);
+                NSInteger blockquoteLevel =
+                    EnrichedParagraphBlockQuoteLevel(pStyle);
+                CGFloat blockquoteIndentUnit =
+                    [self.host.config blockquoteBorderWidth] +
+                    [self.host.config blockquoteGapWidth];
                 CGFloat blockquoteIndent =
-                    EnrichedParagraphHasBlockQuote(pStyle)
-                        ? [self.host.config blockquoteBorderWidth] +
-                              [self.host.config blockquoteGapWidth]
+                    blockquoteLevel >= 0
+                        ? blockquoteIndentUnit * (blockquoteLevel + 1)
                         : 0.0;
                 CGFloat listHeadIndent =
                     baseMargin * (level + 1) + gapWidth + blockquoteIndent;
@@ -116,8 +144,15 @@ static BOOL EnrichedParagraphHasBlockQuote(NSParagraphStyle *pStyle) {
 }
 
 - (BOOL)matchesParagraphMarker:(NSString *)markerFormat
-                          value:(NSString *)value {
+                         value:(NSString *)value {
   return EnrichedListMarkerMatches(markerFormat, value);
+}
+
+- (void)reapplyFromStylePair:(StylePair *)pair {
+  NSRange range = [pair.rangeValue rangeValue];
+  NSString *markerFormat =
+      EnrichedListMarkerFromStylePair(pair, [self getValue]);
+  [self add:range withValue:markerFormat withTyping:NO withDirtyRange:NO];
 }
 
 - (BOOL)tryHandlingListShorcutInRange:(NSRange)range

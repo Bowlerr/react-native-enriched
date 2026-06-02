@@ -274,6 +274,22 @@ TEST(GumboParserTest, EnrichedTagRemappings) {
   EXPECT_EQ(GumboParser::normalizeHtml("<h5>x</h5>"), "<h5>x</h5>");
   EXPECT_EQ(GumboParser::normalizeHtml("<h6>x</h6>"), "<h6>x</h6>");
 
+  // Alignment style attributes
+  EXPECT_EQ(GumboParser::normalizeHtml("<p style=\"text-align: center\">x</p>"),
+            "<p style=\"text-align: center\">x</p>");
+  EXPECT_EQ(
+      GumboParser::normalizeHtml("<h2 style=\"text-align: right\">x</h2>"),
+      "<h2 style=\"text-align: right\">x</h2>");
+  EXPECT_EQ(GumboParser::normalizeHtml(
+                "<blockquote style=\"text-align: justify\">x</blockquote>"),
+            "<blockquote style=\"text-align: justify\"><p>x</p></blockquote>");
+  EXPECT_EQ(GumboParser::normalizeHtml(
+                "<ul><li style=\"text-align: center\">x</li></ul>"),
+            "<ul><li style=\"text-align: center\">x</li></ul>");
+  EXPECT_EQ(
+      GumboParser::normalizeHtml("<div style=\"text-align: right\">x</div>"),
+      "<p style=\"text-align: right\">x</p>");
+
   // Self-closing tags
   EXPECT_EQ(GumboParser::normalizeHtml("<br>"), "<br>");
   EXPECT_EQ(GumboParser::normalizeHtml(
@@ -302,6 +318,13 @@ TEST(GumboParserTest, EnrichedTagRemappings) {
   EXPECT_EQ(GumboParser::normalizeHtml(
                 "<ul data-type=\"checkbox\"><li checked>x</li></ul>"),
             "<ul data-type=\"checkbox\"><li checked>x</li></ul>");
+  EXPECT_EQ(GumboParser::normalizeHtml("<ul data-type='checkboxList'><li "
+                                       "data-checked='true'>x</li></ul>"),
+            "<ul data-type=\"checkbox\"><li checked>x</li></ul>");
+  EXPECT_EQ(GumboParser::normalizeHtml(
+                "<ul data-type='CheckboxList'><li checked='false'>x</li><li "
+                "data-checked='false'>y</li></ul>"),
+            "<ul data-type=\"checkbox\"><li>x</li><li>y</li></ul>");
 
   // Mentions
   EXPECT_EQ(
@@ -446,6 +469,15 @@ TEST(GumboParserTest, ListFlattening) {
                 "<ul><li><b>another one </b>hi "
                 "kacper,<div><br></div><div>hi</div></li></ul>"),
             "<ul><li><b>another one </b>hi kacper,</li><li>hi</li></ul>");
+  EXPECT_EQ(GumboParser::normalizeHtml(
+                "<ol><li>parent<ul data-type='checkbox'><li "
+                "checked>done</li><li>todo</li></ul></li></ol>"),
+            "<ol><li>parent<ul data-type=\"checkbox\"><li "
+            "checked>done</li><li>todo</li></ul></li></ol>");
+  EXPECT_EQ(
+      GumboParser::normalizeHtml(
+          "<ul><li>parent<ol><li>first</li><li>second</li></ol></li></ul>"),
+      "<ul><li>parent<ol><li>first</li><li>second</li></ol></li></ul>");
 }
 
 TEST(GumboParserTest, BrRemappings) {

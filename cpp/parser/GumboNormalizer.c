@@ -270,6 +270,9 @@ typedef struct {
   bool strikethrough;
 } css_styles_t;
 
+static const char *text_align_keywords[] = {"left", "center", "right",
+                                            "justify"};
+
 static const char *find_css_value(const char *style, size_t style_len,
                                   const char *prop_name, size_t *val_len) {
   size_t plen = strlen(prop_name);
@@ -381,6 +384,51 @@ static css_styles_t parse_css_style(const char *style_value, size_t style_len) {
   return result;
 }
 
+static const char *parse_text_align(const char *style_value, size_t style_len) {
+  if (!style_value || style_len == 0)
+    return NULL;
+
+  size_t value_len = 0;
+  const char *value =
+      find_css_value(style_value, style_len, "text-align", &value_len);
+  if (!value || value_len == 0)
+    return NULL;
+
+  while (value_len > 0 && is_ascii_whitespace(*value)) {
+    value++;
+    value_len--;
+  }
+  while (value_len > 0 && is_ascii_whitespace(value[value_len - 1])) {
+    value_len--;
+  }
+
+  for (size_t i = 0; i < sizeof(text_align_keywords) / sizeof(char *); i++) {
+    const char *keyword = text_align_keywords[i];
+    size_t keyword_len = strlen(keyword);
+    if (value_len < keyword_len)
+      continue;
+
+    bool matches = true;
+    for (size_t j = 0; j < keyword_len; j++) {
+      if (tolower((unsigned char)value[j]) !=
+          tolower((unsigned char)keyword[j])) {
+        matches = false;
+        break;
+      }
+    }
+
+    if (!matches)
+      continue;
+
+    if (value_len == keyword_len || is_ascii_whitespace(value[keyword_len]) ||
+        value[keyword_len] == '!' || value[keyword_len] == ';') {
+      return keyword;
+    }
+  }
+
+  return NULL;
+}
+
 static css_styles_t extra_styles(css_styles_t s, const char *tag) {
   if (strcmp(tag, "b") == 0)
     s.bold = false;
@@ -426,6 +474,33 @@ static const char *get_attr(GumboElement *el, const char *name) {
   return NULL;
 }
 
+static bool attr_value_equals_ignore_case(const char *value,
+                                          const char *expected) {
+  if (!value || !expected)
+    return false;
+
+  while (*value && *expected) {
+    if (tolower((unsigned char)*value) != tolower((unsigned char)*expected))
+      return false;
+    value++;
+    expected++;
+  }
+
+  return *value == '\0' && *expected == '\0';
+}
+
+static bool attr_value_is_truthy(const char *value) {
+  if (!value)
+    return false;
+  if (value[0] == '\0')
+    return true;
+
+  return attr_value_equals_ignore_case(value, "true") ||
+         attr_value_equals_ignore_case(value, "1") ||
+         attr_value_equals_ignore_case(value, "yes") ||
+         attr_value_equals_ignore_case(value, "checked");
+}
+
 static void emit_one_attr(buffer_t *out, GumboElement *el,
                           const char *attr_name) {
   const char *val = get_attr(el, attr_name);
@@ -436,6 +511,26 @@ static void emit_one_attr(buffer_t *out, GumboElement *el,
     buffer_append_str(out, val);
     buffer_append_str(out, "\"");
   }
+}
+
+static bool tag_supports_text_align(const char *tag_name) {
+  return strcmp(tag_name, "p") == 0 || strcmp(tag_name, "h1") == 0 ||
+         strcmp(tag_name, "h2") == 0 || strcmp(tag_name, "h3") == 0 ||
+         strcmp(tag_name, "h4") == 0 || strcmp(tag_name, "h5") == 0 ||
+         strcmp(tag_name, "h6") == 0 || strcmp(tag_name, "blockquote") == 0 ||
+         strcmp(tag_name, "ul") == 0 || strcmp(tag_name, "ol") == 0 ||
+         strcmp(tag_name, "li") == 0 || strcmp(tag_name, "codeblock") == 0;
+}
+
+static void emit_text_align_attr(buffer_t *out, const char *style_value,
+                                 size_t style_len) {
+  const char *text_align = parse_text_align(style_value, style_len);
+  if (!text_align)
+    return;
+
+  buffer_append_str(out, " style=\"text-align: ");
+  buffer_append_str(out, text_align);
+  buffer_append_str(out, "\"");
 }
 
 static void emit_attributes(GumboElement *el, const char *tag_name,
@@ -449,15 +544,25 @@ static void emit_attributes(GumboElement *el, const char *tag_name,
     emit_one_attr(out, el, "height");
   } else if (strcmp(tag_name, "ul") == 0) {
     const char *val = get_attr(el, "data-type");
-    if (val && strcmp(val, "checkbox") == 0)
+    if (attr_value_equals_ignore_case(val, "checkbox") ||
+        attr_value_equals_ignore_case(val, "checkboxList"))
       buffer_append_str(out, " data-type=\"checkbox\"");
   } else if (strcmp(tag_name, "li") == 0) {
-    if (gumbo_get_attribute(&el->attributes, "checked") != NULL)
+    GumboAttribute *checked = gumbo_get_attribute(&el->attributes, "checked");
+    const char *data_checked = get_attr(el, "data-checked");
+    if ((checked != NULL && attr_value_is_truthy(checked->value)) ||
+        attr_value_is_truthy(data_checked))
       buffer_append_str(out, " checked");
   } else if (strcmp(tag_name, "mention") == 0) {
     emit_one_attr(out, el, "id");
     emit_one_attr(out, el, "text");
     emit_one_attr(out, el, "indicator");
+  }
+
+  if (tag_supports_text_align(tag_name)) {
+    const char *style_value = get_attr(el, "style");
+    emit_text_align_attr(out, style_value,
+                         style_value ? strlen(style_value) : 0);
   }
 }
 
@@ -582,8 +687,7 @@ static void flatten_li_node(GumboNode *node, buffer_t *ib, buffer_t *out,
     return;
   }
   if (is_list_node(node)) {
-    flush_li_buffer(ib, out, ctx);
-    walk_node(node, out);
+    walk_node(node, ib);
     return;
   }
   if (is_br_node(node)) {
@@ -636,9 +740,7 @@ static void walk_children_with_whitespace(GumboNode *node, buffer_t *out,
     /* Preserve blockquote children so nested lists/headings/code blocks keep
        their own semantics while also inheriting quote styling. */
     if (is_blockquote_node(child)) {
-      buffer_append_str(out, "<blockquote>");
-      walk_children_with_whitespace(child, out, preserve_whitespace);
-      buffer_append_str(out, "</blockquote>");
+      walk_node_with_whitespace(child, out, preserve_whitespace);
       i++;
       continue;
     }
@@ -760,8 +862,7 @@ static void append_normalized_text(buffer_t *out, const char *text_raw,
   }
 
   if (!suppress_boundary_spaces && end < text_len && emitted_visible_text &&
-      out->len > 0 &&
-      !is_ascii_whitespace(out->data[out->len - 1])) {
+      out->len > 0 && !is_ascii_whitespace(out->data[out->len - 1])) {
     buffer_append_str(out, " ");
   }
 }
@@ -849,7 +950,9 @@ static void walk_node_with_whitespace(GumboNode *node, buffer_t *out,
         GumboNode *dc = div_children->data[di];
         if (is_br_node(dc)) {
           if (pb.len > 0) {
-            buffer_append_str(out, "<p>");
+            buffer_append_str(out, "<p");
+            emit_text_align_attr(out, sval, slen);
+            buffer_append_str(out, ">");
             emit_styles_open(out, s);
             buffer_append(out, pb.data, pb.len);
             emit_styles_close(out, s);
@@ -864,7 +967,9 @@ static void walk_node_with_whitespace(GumboNode *node, buffer_t *out,
       }
       buffer_trim_whitespace(&pb);
       if (pb.len > 0) {
-        buffer_append_str(out, "<p>");
+        buffer_append_str(out, "<p");
+        emit_text_align_attr(out, sval, slen);
+        buffer_append_str(out, ">");
         emit_styles_open(out, s);
         buffer_append(out, pb.data, pb.len);
         emit_styles_close(out, s);
@@ -956,7 +1061,9 @@ static void walk_node_with_whitespace(GumboNode *node, buffer_t *out,
       buffer_t cb = buffer_create(64);
       walk_children_with_whitespace(node, &cb, true);
       buffer_trim_whitespace(&cb);
-      buffer_append_str(out, "<codeblock>");
+      buffer_append_str(out, "<codeblock");
+      emit_attributes(el, out_name, out);
+      buffer_append_str(out, ">");
       if (wrap)
         buffer_append_str(out, "<p>");
       buffer_append(out, cb.data, cb.len);
@@ -964,6 +1071,23 @@ static void walk_node_with_whitespace(GumboNode *node, buffer_t *out,
         buffer_append_str(out, "</p>");
       buffer_append_str(out, "</codeblock>");
       free(cb.data);
+      break;
+    }
+
+    /* <blockquote>: wrap inline content in <p> */
+    if (strcmp(out_name, "blockquote") == 0) {
+      bool wrap = is_purely_inline(node);
+      buffer_append_str(out, "<blockquote");
+      emit_attributes(el, out_name, out);
+      buffer_append_str(out, ">");
+      if (wrap)
+        buffer_append_str(out, "<p>");
+      emit_styles_open(out, es);
+      walk_children_with_whitespace(node, out, preserve_whitespace);
+      emit_styles_close(out, es);
+      if (wrap)
+        buffer_append_str(out, "</p>");
+      buffer_append_str(out, "</blockquote>");
       break;
     }
 

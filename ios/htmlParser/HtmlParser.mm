@@ -141,6 +141,39 @@
   return str;
 }
 
++ (NSString *)
+    stringByAddingNewlinesToOpeningTagsMatchingPattern:(NSString *)pattern
+                                              inString:(NSString *)html
+                                               leading:(BOOL)leading
+                                              trailing:(BOOL)trailing {
+  NSError *error = nil;
+  NSRegularExpression *regex = [NSRegularExpression
+      regularExpressionWithPattern:pattern
+                           options:NSRegularExpressionCaseInsensitive
+                             error:&error];
+  if (regex == nil || error != nil) {
+    return html;
+  }
+
+  NSMutableString *str = [html mutableCopy];
+  NSArray<NSTextCheckingResult *> *matches =
+      [regex matchesInString:html options:0 range:NSMakeRange(0, html.length)];
+
+  for (NSInteger index = (NSInteger)matches.count - 1; index >= 0; index--) {
+    NSRange range = matches[(NSUInteger)index].range;
+    if (trailing && NSMaxRange(range) < str.length &&
+        [str characterAtIndex:NSMaxRange(range)] != '\n') {
+      [str insertString:@"\n" atIndex:NSMaxRange(range)];
+    }
+    if (leading && range.location > 0 &&
+        [str characterAtIndex:range.location - 1] != '\n') {
+      [str insertString:@"\n" atIndex:range.location];
+    }
+  }
+
+  return str;
+}
+
 #pragma mark - External HTML normalization
 
 /**
@@ -203,10 +236,44 @@
 }
 
 + (BOOL)isUlCheckboxList:(NSString *)params {
-  return ([params containsString:@"data-type=\"checkbox\""] ||
-          [params containsString:@"data-type='checkbox'"] ||
-          [params containsString:@"data-type=\"checkboxList\""] ||
-          [params containsString:@"data-type='checkboxList'"]);
+  NSString *lowercaseParams = [params lowercaseString];
+  NSString *compactParams =
+      [[lowercaseParams componentsSeparatedByCharactersInSet:
+                            [NSCharacterSet whitespaceAndNewlineCharacterSet]]
+          componentsJoinedByString:@""];
+  return ([compactParams containsString:@"data-type=\"checkbox\""] ||
+          [compactParams containsString:@"data-type='checkbox'"] ||
+          [compactParams containsString:@"data-type=checkbox"] ||
+          [compactParams containsString:@"data-type=\"checkboxlist\""] ||
+          [compactParams containsString:@"data-type='checkboxlist'"] ||
+          [compactParams containsString:@"data-type=checkboxlist"]);
+}
+
++ (BOOL)isCheckedCheckboxListItem:(NSString *)params {
+  NSString *lowercaseParams = [params lowercaseString];
+  NSString *compactParams =
+      [[lowercaseParams componentsSeparatedByCharactersInSet:
+                            [NSCharacterSet whitespaceAndNewlineCharacterSet]]
+          componentsJoinedByString:@""];
+  if ([compactParams containsString:@"data-checked=\"false\""] ||
+      [compactParams containsString:@"data-checked='false'"] ||
+      [compactParams containsString:@"data-checked=false"] ||
+      [compactParams containsString:@"checked=\"false\""] ||
+      [compactParams containsString:@"checked='false'"] ||
+      [compactParams containsString:@"checked=false"]) {
+    return NO;
+  }
+
+  if ([compactParams containsString:@"data-checked=\"true\""] ||
+      [compactParams containsString:@"data-checked='true'"] ||
+      [compactParams containsString:@"data-checked=true"] ||
+      [compactParams containsString:@"checked=\"true\""] ||
+      [compactParams containsString:@"checked='true'"] ||
+      [compactParams containsString:@"checked=true"]) {
+    return YES;
+  }
+
+  return [compactParams containsString:@"checked"];
 }
 
 + (NSInteger)currentListLevelFromOngoingTags:(NSDictionary *)ongoingTags {
@@ -221,25 +288,38 @@
 + (NSString *)paramsByAppendingListLevel:(NSString *)params
                                    level:(NSInteger)level
                                contextId:(NSInteger)contextId {
-  NSString *levelParam = [NSString
-      stringWithFormat:@"data-enriched-list-level=\"%ld\" "
-                       @"data-enriched-list-context=\"%ld\"",
-                       (long)level, (long)contextId];
+  NSString *levelParam =
+      [NSString stringWithFormat:@"data-enriched-list-level=\"%ld\" "
+                                 @"data-enriched-list-context=\"%ld\"",
+                                 (long)level, (long)contextId];
   if (params.length == 0) {
     return levelParam;
   }
   return [NSString stringWithFormat:@"%@ %@", params, levelParam];
 }
 
++ (NSString *)paramsByAppendingBlockQuoteContext:(NSString *)params
+                                           level:(NSInteger)level
+                                       contextId:(NSInteger)contextId {
+  NSString *contextParams =
+      [NSString stringWithFormat:@"data-enriched-blockquote-level=\"%ld\" "
+                                 @"data-enriched-blockquote-context=\"%ld\"",
+                                 (long)level, (long)contextId];
+  if (params.length == 0) {
+    return contextParams;
+  }
+  return [NSString stringWithFormat:@"%@ %@", params, contextParams];
+}
+
 + (NSString *)paramsByAppendingListItemContext:(NSString *)params
                                        listTag:(NSString *)listTag
                                          level:(NSInteger)level
                                      contextId:(NSInteger)contextId {
-  NSString *contextParams = [NSString
-      stringWithFormat:@"data-enriched-list-item=\"%@\" "
-                       @"data-enriched-list-level=\"%ld\" "
-                       @"data-enriched-list-context=\"%ld\"",
-                       listTag, (long)level, (long)contextId];
+  NSString *contextParams =
+      [NSString stringWithFormat:@"data-enriched-list-item=\"%@\" "
+                                 @"data-enriched-list-level=\"%ld\" "
+                                 @"data-enriched-list-context=\"%ld\"",
+                                 listTag, (long)level, (long)contextId];
   if (params.length == 0) {
     return contextParams;
   }
@@ -248,7 +328,8 @@
 
 + (NSInteger)listLevelFromParams:(NSString *)params {
   NSRegularExpression *levelRegex = [NSRegularExpression
-      regularExpressionWithPattern:@"data-enriched-list-level=['\\\"]([0-9]+)['\\\"]"
+      regularExpressionWithPattern:
+          @"data-enriched-list-level=['\\\"]([0-9]+)['\\\"]"
                            options:0
                              error:nil];
   NSTextCheckingResult *match =
@@ -264,7 +345,8 @@
 
 + (NSInteger)listContextFromParams:(NSString *)params {
   NSRegularExpression *contextRegex = [NSRegularExpression
-      regularExpressionWithPattern:@"data-enriched-list-context=['\\\"]([0-9]+)['\\\"]"
+      regularExpressionWithPattern:
+          @"data-enriched-list-context=['\\\"]([0-9]+)['\\\"]"
                            options:0
                              error:nil];
   NSTextCheckingResult *match =
@@ -278,15 +360,139 @@
   return MAX(0, [contextString integerValue]);
 }
 
++ (NSInteger)blockQuoteLevelFromParams:(NSString *)params {
+  NSRegularExpression *levelRegex = [NSRegularExpression
+      regularExpressionWithPattern:
+          @"data-enriched-blockquote-level=['\\\"]([0-9]+)['\\\"]"
+                           options:0
+                             error:nil];
+  NSTextCheckingResult *match =
+      [levelRegex firstMatchInString:params
+                             options:0
+                               range:NSMakeRange(0, params.length)];
+  if (match == nullptr || match.numberOfRanges < 2) {
+    return 0;
+  }
+  NSString *levelString = [params substringWithRange:[match rangeAtIndex:1]];
+  return MAX(0, [levelString integerValue]);
+}
+
++ (NSInteger)blockQuoteContextFromParams:(NSString *)params {
+  NSRegularExpression *contextRegex = [NSRegularExpression
+      regularExpressionWithPattern:
+          @"data-enriched-blockquote-context=['\\\"]([0-9]+)['\\\"]"
+                           options:0
+                             error:nil];
+  NSTextCheckingResult *match =
+      [contextRegex firstMatchInString:params
+                               options:0
+                                 range:NSMakeRange(0, params.length)];
+  if (match == nullptr || match.numberOfRanges < 2) {
+    return -1;
+  }
+  NSString *contextString = [params substringWithRange:[match rangeAtIndex:1]];
+  return MAX(0, [contextString integerValue]);
+}
+
++ (NSString *)blockQuoteMarkerValueWithLevel:(NSInteger)level
+                                   contextId:(NSInteger)contextId {
+  if (contextId < 0) {
+    if (level <= 0) {
+      return @"EnrichedBlockQuote";
+    }
+    return [NSString stringWithFormat:@"EnrichedBlockQuote:%ld", (long)level];
+  }
+  return [NSString stringWithFormat:@"EnrichedBlockQuote:%ld:%ld", (long)level,
+                                    (long)contextId];
+}
+
++ (BOOL)blockQuoteMarkerMatches:(NSString *)markerFormat {
+  if (markerFormat == nil) {
+    return NO;
+  }
+
+  NSString *baseValue = @"EnrichedBlockQuote";
+  NSString *continuationBaseValue =
+      [baseValue stringByAppendingString:@"Continuation"];
+  return [markerFormat isEqualToString:baseValue] ||
+         [markerFormat hasPrefix:[baseValue stringByAppendingString:@":"]] ||
+         [markerFormat isEqualToString:continuationBaseValue] ||
+         [markerFormat
+             hasPrefix:[continuationBaseValue stringByAppendingString:@":"]];
+}
+
++ (NSInteger)blockQuoteLevelFromMarker:(NSString *)markerFormat {
+  if (![self blockQuoteMarkerMatches:markerFormat]) {
+    return -1;
+  }
+
+  NSRange separator = [markerFormat rangeOfString:@":"];
+  if (separator.location == NSNotFound) {
+    return 0;
+  }
+
+  NSString *levelString =
+      [markerFormat substringFromIndex:separator.location + separator.length];
+  return MAX(0, [levelString integerValue]);
+}
+
++ (NSString *)blockQuoteMarkerAtLocation:(NSInteger)location
+                                    host:(id<EnrichedViewHost>)host {
+  if (host.textView.textStorage.length == 0) {
+    return nil;
+  }
+
+  NSUInteger styleLocation =
+      MIN(MAX(location, 0), (NSInteger)host.textView.textStorage.length - 1);
+  NSParagraphStyle *pStyle =
+      [host.textView.textStorage attribute:NSParagraphStyleAttributeName
+                                   atIndex:styleLocation
+                            effectiveRange:nil];
+  NSString *marker = nil;
+  NSInteger markerLevel = -1;
+  for (NSTextList *textList in pStyle.textLists) {
+    NSInteger currentLevel =
+        [self blockQuoteLevelFromMarker:textList.markerFormat];
+    if (currentLevel >= 0 && currentLevel >= markerLevel) {
+      marker = textList.markerFormat;
+      markerLevel = currentLevel;
+    }
+  }
+  return marker;
+}
+
++ (NSInteger)blockQuoteDepthFromMarker:(NSString *)markerFormat {
+  NSInteger level = [self blockQuoteLevelFromMarker:markerFormat];
+  if (level >= 0) {
+    return level + 1;
+  }
+  return 0;
+}
+
++ (void)appendOpeningBlockQuotes:(NSInteger)count
+                        toResult:(NSMutableString *)result {
+  for (NSInteger index = 0; index < count; index++) {
+    [result appendString:@"\n<blockquote>"];
+  }
+}
+
++ (void)appendClosingBlockQuotes:(NSInteger)count
+                        toResult:(NSMutableString *)result {
+  for (NSInteger index = 0; index < count; index++) {
+    [result appendString:@"\n</blockquote>"];
+  }
+}
+
 + (NSString *)listItemTagFromParams:(NSString *)params {
   NSRegularExpression *itemRegex = [NSRegularExpression
-      regularExpressionWithPattern:@"data-enriched-list-item=['\\\"]([^'\\\"]+)['\\\"]"
+      regularExpressionWithPattern:
+          @"data-enriched-list-item=['\\\"]([^'\\\"]+)['\\\"]"
                            options:0
                              error:nil];
   NSTextCheckingResult *match =
       [itemRegex firstMatchInString:params
-                             options:0
-                               range:NSMakeRange(0, params.length)];
+                            options:0
+                              range:NSMakeRange(0, params.length)];
   if (match == nullptr || match.numberOfRanges < 2) {
     return nil;
   }
@@ -307,8 +513,8 @@
   if (contextId < 0) {
     return [self listMarkerValueWithBase:baseValue level:level];
   }
-  return [NSString stringWithFormat:@"%@:%ld:%ld", baseValue, (long)level,
-                                    (long)contextId];
+  return [NSString
+      stringWithFormat:@"%@:%ld:%ld", baseValue, (long)level, (long)contextId];
 }
 
 + (BOOL)paragraphRangeHasVisibleContent:(NSString *)text range:(NSRange)range {
@@ -369,6 +575,22 @@
   return NO;
 }
 
++ (BOOL)isCurrentListCheckboxList:(NSDictionary *)ongoingTags
+                  ongoingListTags:(NSArray<NSString *> *)ongoingListTags {
+  if (ongoingListTags.count == 0 ||
+      ![ongoingListTags.lastObject isEqualToString:@"ul"]) {
+    return NO;
+  }
+
+  NSArray *ulStack = ongoingTags[@"ul"];
+  NSArray *currentUl = ulStack.lastObject;
+  if (currentUl.count <= 2) {
+    return NO;
+  }
+
+  return [self isUlCheckboxList:(NSString *)currentUl[2]];
+}
+
 + (NSDictionary *)prepareCheckboxListStyleValue:(NSValue *)rangeValue
                                  checkboxStates:(NSDictionary *)checkboxStates {
   NSRange range = [rangeValue rangeValue];
@@ -382,6 +604,83 @@
   }
 
   return statesInRange;
+}
+
++ (BOOL)checkboxStateInListItemRange:(NSRange)itemRange
+                      checkboxStates:(NSDictionary *)checkboxStates {
+  NSNumber *exactState = checkboxStates[@(itemRange.location)];
+  if (exactState != nil) {
+    return [exactState boolValue];
+  }
+
+  NSUInteger itemEnd = NSMaxRange(itemRange);
+  for (NSNumber *key in checkboxStates) {
+    NSUInteger position = [key unsignedIntegerValue];
+    if (position >= itemRange.location && position < itemEnd) {
+      return [checkboxStates[key] boolValue];
+    }
+  }
+
+  return NO;
+}
+
++ (void)sortProcessedStylesByRangeContainment:
+    (NSMutableArray *)processedStyles {
+  NSMapTable *originalPositions = [NSMapTable
+      mapTableWithKeyOptions:NSPointerFunctionsObjectPointerPersonality
+                valueOptions:NSPointerFunctionsStrongMemory];
+
+  for (NSUInteger index = 0; index < processedStyles.count; index++) {
+    [originalPositions setObject:@(index) forKey:processedStyles[index]];
+  }
+
+  [processedStyles
+      sortUsingComparator:^NSComparisonResult(NSArray *left, NSArray *right) {
+        if (left.count < 2 || right.count < 2) {
+          return NSOrderedSame;
+        }
+
+        StylePair *leftPair = (StylePair *)left[1];
+        StylePair *rightPair = (StylePair *)right[1];
+        if (![leftPair isKindOfClass:[StylePair class]] ||
+            ![rightPair isKindOfClass:[StylePair class]]) {
+          return NSOrderedSame;
+        }
+
+        NSRange leftRange = [leftPair.rangeValue rangeValue];
+        NSRange rightRange = [rightPair.rangeValue rangeValue];
+
+        if (leftRange.location < rightRange.location) {
+          return NSOrderedAscending;
+        }
+        if (leftRange.location > rightRange.location) {
+          return NSOrderedDescending;
+        }
+
+        if (leftRange.length > rightRange.length) {
+          return NSOrderedAscending;
+        }
+        if (leftRange.length < rightRange.length) {
+          return NSOrderedDescending;
+        }
+
+        // Equal ranges happen when a list item paragraph only contains a nested
+        // block, for example <li><blockquote>...</blockquote></li>. The outer
+        // tag closes later, so apply later-produced styles first to preserve
+        // nesting.
+        NSUInteger leftPosition =
+            [[originalPositions objectForKey:left] unsignedIntegerValue];
+        NSUInteger rightPosition =
+            [[originalPositions objectForKey:right] unsignedIntegerValue];
+        if (leftPosition > rightPosition) {
+          return NSOrderedAscending;
+        }
+        if (leftPosition < rightPosition) {
+          return NSOrderedDescending;
+        }
+
+        return NSOrderedSame;
+      }];
 }
 
 + (NSString *_Nullable)initiallyProcessHtml:(NSString *_Nonnull)html
@@ -487,6 +786,11 @@
                                          inString:fixedHtml
                                           leading:YES
                                          trailing:YES];
+    fixedHtml = [self
+        stringByAddingNewlinesToOpeningTagsMatchingPattern:@"<ul\\s+[^>]*>"
+                                                  inString:fixedHtml
+                                                   leading:YES
+                                                  trailing:YES];
     fixedHtml = [self stringByAddingNewlinesToTag:@"</ul>"
                                          inString:fixedHtml
                                           leading:YES
@@ -495,6 +799,11 @@
                                          inString:fixedHtml
                                           leading:YES
                                          trailing:YES];
+    fixedHtml = [self
+        stringByAddingNewlinesToOpeningTagsMatchingPattern:@"<ol\\s+[^>]*>"
+                                                  inString:fixedHtml
+                                                   leading:YES
+                                                  trailing:YES];
     fixedHtml = [self stringByAddingNewlinesToTag:@"</ol>"
                                          inString:fixedHtml
                                           leading:YES
@@ -529,6 +838,11 @@
                                          inString:fixedHtml
                                           leading:YES
                                          trailing:NO];
+    fixedHtml = [self
+        stringByAddingNewlinesToOpeningTagsMatchingPattern:@"<li\\s+[^>]*>"
+                                                  inString:fixedHtml
+                                                   leading:YES
+                                                  trailing:NO];
     fixedHtml = [self stringByAddingNewlinesToTag:@"<h1>"
                                          inString:fixedHtml
                                           leading:YES
@@ -632,6 +946,7 @@
       [[NSMutableArray alloc] init];
   NSInteger precedingImageCount = 0;
   NSInteger listContextId = 0;
+  NSInteger blockquoteContextId = 0;
   BOOL insideTag = NO;
   BOOL gettingTagName = NO;
   BOOL gettingTagParams = NO;
@@ -677,21 +992,25 @@
                                 currentTagParams.length == 0;
 
         if (!isPlainParagraph) {
-          // Only track checkbox state if we're inside a checkbox list.
-          if ([currentTagName isEqualToString:@"li"] &&
-              [self isInsideCheckboxList:ongoingTags]) {
-            BOOL isChecked = [currentTagParams containsString:@"checked"];
-            checkboxStates[@(plainText.length)] = @(isChecked);
-          }
-
           if ([self shouldInsertLineBreakBeforeOpeningBlockTag:currentTagName
                                                      plainText:plainText]) {
             [plainText appendString:@"\n"];
           }
 
+          // Track checkbox state at the same text location used for the list
+          // item tag range. Some list items insert a synthetic leading newline;
+          // recording before that newline leaves the checkbox state just
+          // outside the final paragraph range.
+          if ([currentTagName isEqualToString:@"li"] &&
+              [self isCurrentListCheckboxList:ongoingTags
+                              ongoingListTags:ongoingListTags]) {
+            BOOL isChecked = [self isCheckedCheckboxListItem:currentTagParams];
+            checkboxStates[@(plainText.length)] = @(isChecked);
+          }
+
           // we finish opening tag - get its location, the current
-          // precedingImageCount and optionally params and put them under tag name
-          // key in ongoingTags. Storing the open-time image count lets
+          // precedingImageCount and optionally params and put them under tag
+          // name key in ongoingTags. Storing the open-time image count lets
           // finalizeTagEntry: correctly shift the start and extend the length
           // so the range covers any images finalized between open and close.
           NSMutableArray *tagArr = [[NSMutableArray alloc] init];
@@ -708,21 +1027,30 @@
                                                contextId:currentListContextId];
             [ongoingListContextIds
                 addObject:[NSNumber numberWithInteger:currentListContextId]];
+          } else if ([currentTagName isEqualToString:@"blockquote"]) {
+            NSInteger quoteLevel = [ongoingTags[@"blockquote"] count];
+            NSInteger currentQuoteContextId = blockquoteContextId++;
+            tagParams =
+                [self paramsByAppendingBlockQuoteContext:tagParams
+                                                   level:quoteLevel
+                                               contextId:currentQuoteContextId];
           } else if ([currentTagName isEqualToString:@"li"] &&
                      ongoingListTags.count > 0) {
-            NSString *parentListTag = [self isInsideCheckboxList:ongoingTags]
-                                          ? @"checkbox"
-                                          : ongoingListTags.lastObject;
+            BOOL isCheckboxListItem =
+                [self isCurrentListCheckboxList:ongoingTags
+                                ongoingListTags:ongoingListTags];
+            NSString *parentListTag =
+                isCheckboxListItem ? @"checkbox" : ongoingListTags.lastObject;
             NSInteger listLevel = MAX(0, (NSInteger)ongoingListTags.count - 1);
             NSInteger currentListContextId =
                 ongoingListContextIds.count > 0
                     ? [ongoingListContextIds.lastObject integerValue]
                     : -1;
-            tagParams = [self paramsByAppendingListItemContext:tagParams
-                                                       listTag:parentListTag
-                                                         level:listLevel
-                                                     contextId:
-                                                         currentListContextId];
+            tagParams =
+                [self paramsByAppendingListItemContext:tagParams
+                                               listTag:parentListTag
+                                                 level:listLevel
+                                             contextId:currentListContextId];
           }
 
           if (tagParams.length > 0) {
@@ -837,7 +1165,6 @@
 
   // process tags into proper StyleType + StylePair values
   NSMutableArray *processedStyles = [[NSMutableArray alloc] init];
-  NSInteger blockquoteIndex = 0;
 
   for (NSArray *arr in initiallyProcessedTags) {
     NSString *tagName = (NSString *)arr[0];
@@ -997,27 +1324,40 @@
       [styleArr addObject:@([H6Style getType])];
     } else if ([tagName isEqualToString:@"li"]) {
       NSString *listItemTag = [self listItemTagFromParams:params];
-      if (listItemTag == nil || [listItemTag isEqualToString:@"checkbox"]) {
+      if (listItemTag == nil) {
         continue;
       }
 
       NSInteger listLevel = [self listLevelFromParams:params];
       NSInteger listContextId = [self listContextFromParams:params];
-      NSString *baseValue =
-          [listItemTag isEqualToString:@"ol"] ? @"EnrichedOrderedList"
-                                              : @"EnrichedUnorderedList";
-      NSNumber *styleType =
-          [listItemTag isEqualToString:@"ol"]
-              ? @([OrderedListStyle getType])
-              : @([UnorderedListStyle getType]);
-      NSString *continuationBaseValue =
-          [baseValue stringByAppendingString:@"Continuation"];
+      NSString *baseValue = nil;
+      NSString *continuationBaseValue = nil;
+      NSNumber *styleType = nil;
+
+      if ([listItemTag isEqualToString:@"checkbox"]) {
+        BOOL isChecked =
+            [self checkboxStateInListItemRange:tagRangeValue.rangeValue
+                                checkboxStates:checkboxStates];
+        baseValue = isChecked ? @"EnrichedCheckbox1" : @"EnrichedCheckbox0";
+        continuationBaseValue = @"EnrichedCheckboxContinuation";
+        styleType = @([CheckboxListStyle getType]);
+      } else {
+        baseValue = [listItemTag isEqualToString:@"ol"]
+                        ? @"EnrichedOrderedList"
+                        : @"EnrichedUnorderedList";
+        continuationBaseValue =
+            [baseValue stringByAppendingString:@"Continuation"];
+        styleType = [listItemTag isEqualToString:@"ol"]
+                        ? @([OrderedListStyle getType])
+                        : @([UnorderedListStyle getType]);
+      }
+
       NSArray<NSValue *> *paragraphRanges =
           [self paragraphRangesInListItemRange:tagRangeValue.rangeValue
                                      plainText:plainText];
 
-      for (NSUInteger paragraphIndex = 0; paragraphIndex < paragraphRanges.count;
-           paragraphIndex++) {
+      for (NSUInteger paragraphIndex = 0;
+           paragraphIndex < paragraphRanges.count; paragraphIndex++) {
         NSMutableArray *listStyleArr = [[NSMutableArray alloc] init];
         StylePair *listStylePair = [[StylePair alloc] init];
         listStylePair.rangeValue = paragraphRanges[paragraphIndex];
@@ -1034,19 +1374,18 @@
       continue;
     } else if ([tagName isEqualToString:@"ul"]) {
       if ([self isUlCheckboxList:params]) {
-        [styleArr addObject:@([CheckboxListStyle getType])];
-        stylePair.styleValue =
-            [self prepareCheckboxListStyleValue:tagRangeValue
-                                 checkboxStates:checkboxStates];
-      } else {
         continue;
       }
+      continue;
     } else if ([tagName isEqualToString:@"ol"]) {
       continue;
     } else if ([tagName isEqualToString:@"blockquote"]) {
       [styleArr addObject:@([BlockQuoteStyle getType])];
-      stylePair.styleValue = [NSString
-          stringWithFormat:@"EnrichedBlockQuote:%ld", (long)blockquoteIndex++];
+      NSInteger quoteLevel = [self blockQuoteLevelFromParams:params];
+      NSInteger quoteContextId = [self blockQuoteContextFromParams:params];
+      stylePair.styleValue =
+          [self blockQuoteMarkerValueWithLevel:quoteLevel
+                                     contextId:quoteContextId];
     } else if ([tagName isEqualToString:@"codeblock"]) {
       [styleArr addObject:@([CodeBlockStyle getType])];
     } else {
@@ -1059,6 +1398,8 @@
     [styleArr addObject:stylePair];
     [processedStyles addObject:styleArr];
   }
+
+  [self sortProcessedStylesByRangeContainment:processedStyles];
 
   return @[ plainText, processedStyles, foundAlignments ];
 }
@@ -1077,7 +1418,8 @@
   BOOL newLine = YES;
   BOOL inUnorderedList = NO;
   BOOL inOrderedList = NO;
-  BOOL inBlockQuote = NO;
+  NSInteger blockQuoteDepth = 0;
+  NSString *blockQuoteMarker = nil;
   BOOL inCodeBlock = NO;
   BOOL inCheckboxList = NO;
   unichar lastCharacter = 0;
@@ -1136,15 +1478,17 @@
             [result appendString:@"\n</ul>\n<br>"];
             inUnorderedList = NO;
           }
-        } else if (inBlockQuote) {
+        } else if (blockQuoteDepth > 0) {
           BlockQuoteStyle *bqStyle = host.stylesDict[@(BlockQuote)];
           BOOL detected =
               [bqStyle detect:NSMakeRange(currentRange.location, 0)];
           if (detected) {
             [result appendString:@"\n<br>"];
           } else {
-            [result appendString:@"\n</blockquote>\n<br>"];
-            inBlockQuote = NO;
+            [self appendClosingBlockQuotes:blockQuoteDepth toResult:result];
+            [result appendString:@"\n<br>"];
+            blockQuoteDepth = 0;
+            blockQuoteMarker = nil;
           }
         } else if (inCodeBlock) {
           CodeBlockStyle *cbStyle = host.stylesDict[@(CodeBlock)];
@@ -1227,6 +1571,13 @@
       // new line - open the paragraph
       if (newLine) {
         newLine = NO;
+        NSString *desiredBlockQuoteMarker =
+            [currentActiveStyles containsObject:@([BlockQuoteStyle getType])]
+                ? [self blockQuoteMarkerAtLocation:currentRange.location
+                                              host:host]
+                : nil;
+        NSInteger desiredBlockQuoteDepth =
+            [self blockQuoteDepthFromMarker:desiredBlockQuoteMarker];
 
         // handle ending unordered list
         if (inUnorderedList &&
@@ -1243,10 +1594,20 @@
           [result appendString:@"\n</ol>"];
         }
         // handle ending blockquotes
-        if (inBlockQuote && ![currentActiveStyles
-                                containsObject:@([BlockQuoteStyle getType])]) {
-          inBlockQuote = NO;
-          [result appendString:@"\n</blockquote>"];
+        if (blockQuoteDepth > desiredBlockQuoteDepth) {
+          [self
+              appendClosingBlockQuotes:blockQuoteDepth - desiredBlockQuoteDepth
+                              toResult:result];
+          blockQuoteDepth = desiredBlockQuoteDepth;
+          blockQuoteMarker = desiredBlockQuoteMarker;
+        } else if (blockQuoteDepth > 0 &&
+                   desiredBlockQuoteDepth == blockQuoteDepth &&
+                   blockQuoteMarker != nil && desiredBlockQuoteMarker != nil &&
+                   ![blockQuoteMarker
+                       isEqualToString:desiredBlockQuoteMarker]) {
+          [self appendClosingBlockQuotes:blockQuoteDepth toResult:result];
+          blockQuoteDepth = 0;
+          blockQuoteMarker = nil;
         }
         // handle ending codeblock
         if (inCodeBlock &&
@@ -1284,10 +1645,12 @@
                                                           cssStyleString]];
         }
         // handle starting blockquotes
-        if (!inBlockQuote &&
-            [currentActiveStyles containsObject:@([BlockQuoteStyle getType])]) {
-          inBlockQuote = YES;
-          [result appendString:@"\n<blockquote>"];
+        if (desiredBlockQuoteDepth > blockQuoteDepth) {
+          [self
+              appendOpeningBlockQuotes:desiredBlockQuoteDepth - blockQuoteDepth
+                              toResult:result];
+          blockQuoteDepth = desiredBlockQuoteDepth;
+          blockQuoteMarker = desiredBlockQuoteMarker;
         }
         // handle starting codeblock
         if (!inCodeBlock &&
@@ -1464,7 +1827,10 @@
       [result appendString:@"\n</ol>"];
     } else if ([previousActiveStyles
                    containsObject:@([BlockQuoteStyle getType])]) {
-      [result appendString:@"\n</blockquote>"];
+      NSInteger closingDepth = blockQuoteDepth > 0 ? blockQuoteDepth : 1;
+      [self appendClosingBlockQuotes:closingDepth toResult:result];
+      blockQuoteDepth = 0;
+      blockQuoteMarker = nil;
     } else if ([previousActiveStyles
                    containsObject:@([CodeBlockStyle getType])]) {
       [result appendString:@"\n</codeblock>"];
@@ -1491,9 +1857,10 @@
       inOrderedList = NO;
       [result appendString:@"\n</ol>"];
     }
-    if (inBlockQuote) {
-      inBlockQuote = NO;
-      [result appendString:@"\n</blockquote>"];
+    if (blockQuoteDepth > 0) {
+      [self appendClosingBlockQuotes:blockQuoteDepth toResult:result];
+      blockQuoteDepth = 0;
+      blockQuoteMarker = nil;
     }
     if (inCodeBlock) {
       inCodeBlock = NO;
@@ -1692,6 +2059,7 @@
       AlignmentEntry *entry = [[AlignmentEntry alloc] init];
       entry.alignment = align;
       entry.range = NSMakeRange(actualStart, length);
+      entry.expandListRange = NO;
       [foundAlignments addObject:entry];
     }
   }

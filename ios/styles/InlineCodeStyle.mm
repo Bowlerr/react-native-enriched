@@ -17,21 +17,38 @@ static NSRange EnrichedInlineCodeVisibleRange(NSString *text, NSRange range) {
 
   NSUInteger start = range.location;
   NSUInteger end = MIN(NSMaxRange(range), text.length);
-  while (start < end &&
-         EnrichedInlineCodeIsDecorativeCharacter(
-             [text characterAtIndex:start])) {
+  while (start < end && EnrichedInlineCodeIsDecorativeCharacter(
+                            [text characterAtIndex:start])) {
     start++;
   }
 
-  while (end > start &&
-         EnrichedInlineCodeIsDecorativeCharacter([text characterAtIndex:end - 1])) {
+  while (end > start && EnrichedInlineCodeIsDecorativeCharacter(
+                            [text characterAtIndex:end - 1])) {
     end--;
   }
 
   return NSMakeRange(start, end - start);
 }
 
-static BOOL EnrichedInlineCodeParagraphHasBlockMarker(NSParagraphStyle *pStyle) {
+static void
+EnrichedInlineCodeApplyTrailingPadding(NSMutableAttributedString *textStorage,
+                                       NSString *text, NSRange range,
+                                       CGFloat padding) {
+  NSRange visibleRange = EnrichedInlineCodeVisibleRange(text, range);
+  if (visibleRange.length == 0) {
+    return;
+  }
+
+  [textStorage removeAttribute:NSKernAttributeName range:visibleRange];
+
+  NSRange trailingCharacterRange = NSMakeRange(NSMaxRange(visibleRange) - 1, 1);
+  [textStorage addAttribute:NSKernAttributeName
+                      value:@(padding)
+                      range:trailingCharacterRange];
+}
+
+static BOOL
+EnrichedInlineCodeParagraphHasBlockMarker(NSParagraphStyle *pStyle) {
   for (NSTextList *textList in pStyle.textLists) {
     NSString *markerFormat = textList.markerFormat;
     if ([markerFormat isEqualToString:@"EnrichedBlockQuote"] ||
@@ -101,6 +118,9 @@ static BOOL EnrichedInlineCodeParagraphHasBlockMarker(NSParagraphStyle *pStyle) 
                                range:fontRange];
                   }
                 }];
+    EnrichedInlineCodeApplyTrailingPadding(
+        self.host.textView.textStorage, self.host.textView.textStorage.string,
+        visibleRange, 3.0);
   }
 
   NSMutableSet<NSString *> *spacedParagraphs = [[NSMutableSet alloc] init];

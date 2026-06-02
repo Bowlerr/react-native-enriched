@@ -29,7 +29,9 @@ static BOOL EnrichedShouldKeepParagraphMarkerWhenAdding(NSString *markerFormat,
   return (EnrichedIsListMarker(markerFormat, @"EnrichedUnorderedList") &&
           EnrichedIsListMarker(value, @"EnrichedUnorderedList")) ||
          (EnrichedIsListMarker(markerFormat, @"EnrichedOrderedList") &&
-          EnrichedIsListMarker(value, @"EnrichedOrderedList"));
+          EnrichedIsListMarker(value, @"EnrichedOrderedList")) ||
+         (EnrichedIsListMarker(markerFormat, @"EnrichedBlockQuote") &&
+          EnrichedIsListMarker(value, @"EnrichedBlockQuote"));
 }
 
 // This method gets overridden
@@ -132,9 +134,8 @@ static BOOL EnrichedShouldKeepParagraphMarkerWhenAdding(NSString *markerFormat,
                   }
 
                   NSIndexSet *matchingIndexes = [textLists
-                      indexesOfObjectsPassingTest:^BOOL(NSTextList *textList,
-                                                        NSUInteger idx,
-                                                        BOOL *stop) {
+                      indexesOfObjectsPassingTest:^BOOL(
+                          NSTextList *textList, NSUInteger idx, BOOL *stop) {
                         NSString *markerFormat = textList.markerFormat;
                         return [self matchesParagraphMarker:markerFormat
                                                       value:value] &&
@@ -142,9 +143,9 @@ static BOOL EnrichedShouldKeepParagraphMarkerWhenAdding(NSString *markerFormat,
                                    markerFormat, value);
                       }];
                   [textLists removeObjectsAtIndexes:matchingIndexes];
-                  [textLists addObject:[[NSTextList alloc]
-                                           initWithMarkerFormat:value
-                                                        options:0]];
+                  [textLists
+                      addObject:[[NSTextList alloc] initWithMarkerFormat:value
+                                                                 options:0]];
                   pStyle.textLists = textLists;
                   [self.host.textView.textStorage
                       addAttribute:NSParagraphStyleAttributeName
@@ -187,12 +188,11 @@ static BOOL EnrichedShouldKeepParagraphMarkerWhenAdding(NSString *markerFormat,
                   }
 
                   NSIndexSet *matchingIndexes = [textLists
-                      indexesOfObjectsPassingTest:^BOOL(NSTextList *textList,
-                                                        NSUInteger idx,
-                                                        BOOL *stop) {
-                        return [self matchesParagraphMarker:textList
-                                                                .markerFormat
-                                                      value:[self getValue]];
+                      indexesOfObjectsPassingTest:^BOOL(
+                          NSTextList *textList, NSUInteger idx, BOOL *stop) {
+                        return
+                            [self matchesParagraphMarker:textList.markerFormat
+                                                   value:[self getValue]];
                       }];
                   [textLists removeObjectsAtIndexes:matchingIndexes];
                   pStyle.textLists = textLists;
@@ -228,9 +228,9 @@ static BOOL EnrichedShouldKeepParagraphMarkerWhenAdding(NSString *markerFormat,
         indexesOfObjectsPassingTest:^BOOL(NSTextList *textList, NSUInteger idx,
                                           BOOL *stop) {
           NSString *markerFormat = textList.markerFormat;
-          return [self matchesParagraphMarker:markerFormat value:value] &&
-                 !EnrichedShouldKeepParagraphMarkerWhenAdding(markerFormat,
-                                                              value);
+          return
+              [self matchesParagraphMarker:markerFormat value:value] &&
+              !EnrichedShouldKeepParagraphMarkerWhenAdding(markerFormat, value);
         }];
     [textLists removeObjectsAtIndexes:matchingIndexes];
     [textLists addObject:[[NSTextList alloc] initWithMarkerFormat:value
@@ -288,7 +288,7 @@ static BOOL EnrichedShouldKeepParagraphMarkerWhenAdding(NSString *markerFormat,
 
     for (NSTextList *textList in pStyle.textLists) {
       if ([self matchesParagraphMarker:textList.markerFormat
-                                  value:[self getValue]]) {
+                                 value:[self getValue]]) {
         return YES;
       }
     }
@@ -297,7 +297,7 @@ static BOOL EnrichedShouldKeepParagraphMarkerWhenAdding(NSString *markerFormat,
 }
 
 - (BOOL)matchesParagraphMarker:(NSString *)markerFormat
-                          value:(NSString *)value {
+                         value:(NSString *)value {
   return markerFormat != nullptr && [markerFormat isEqualToString:value];
 }
 

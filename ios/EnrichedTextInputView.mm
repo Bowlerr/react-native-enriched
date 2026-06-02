@@ -31,11 +31,100 @@
     .isConflicting = [self isStyle:TYPE_ENUM activeInMap:conflictingStyles]    \
   }
 
+static const NSTimeInterval EnrichedHtmlChangeDebounceDelay = 0.12;
+static const NSTimeInterval EnrichedHeightChangeDebounceDelay = 0.08;
+static const NSTimeInterval EnrichedRelayoutDebounceDelay = 1.0 / 60.0;
+
+static BOOL EnrichedEditorMarkerMatchesBase(NSString *markerFormat,
+                                            NSString *baseValue) {
+  if (markerFormat == nil) {
+    return NO;
+  }
+
+  NSString *continuationBaseValue =
+      [baseValue stringByAppendingString:@"Continuation"];
+  return [markerFormat isEqualToString:baseValue] ||
+         [markerFormat hasPrefix:[baseValue stringByAppendingString:@":"]] ||
+         [markerFormat isEqualToString:continuationBaseValue] ||
+         [markerFormat
+             hasPrefix:[continuationBaseValue stringByAppendingString:@":"]];
+}
+
+static NSString *EnrichedEditorListFamily(NSString *markerFormat) {
+  if (EnrichedEditorMarkerMatchesBase(markerFormat, @"EnrichedUnorderedList")) {
+    return @"EnrichedUnorderedList";
+  }
+  if (EnrichedEditorMarkerMatchesBase(markerFormat, @"EnrichedOrderedList")) {
+    return @"EnrichedOrderedList";
+  }
+  if ([markerFormat hasPrefix:@"EnrichedCheckbox"]) {
+    return @"EnrichedCheckbox";
+  }
+  return nil;
+}
+
+static BOOL EnrichedEditorMarkerIsBlockQuote(NSString *markerFormat) {
+  return EnrichedEditorMarkerMatchesBase(markerFormat, @"EnrichedBlockQuote");
+}
+
+static NSInteger EnrichedEditorListLevel(NSString *markerFormat) {
+  if (markerFormat == nil) {
+    return 0;
+  }
+
+  NSRange separator = [markerFormat rangeOfString:@":"];
+  if (separator.location == NSNotFound) {
+    return 0;
+  }
+
+  NSString *levelString =
+      [markerFormat substringFromIndex:separator.location + separator.length];
+  return MAX(0, [levelString integerValue]);
+}
+
+static NSString *EnrichedEditorMarkerBase(NSString *markerFormat) {
+  NSArray<NSString *> *parts = [markerFormat componentsSeparatedByString:@":"];
+  return parts.firstObject;
+}
+
+static NSString *EnrichedEditorListContext(NSString *markerFormat) {
+  NSArray<NSString *> *parts = [markerFormat componentsSeparatedByString:@":"];
+  if (parts.count < 3) {
+    return nil;
+  }
+  return parts[2];
+}
+
+static NSString *EnrichedEditorMarkerWithLevel(NSString *baseValue,
+                                               NSInteger level,
+                                               NSString *contextId) {
+  if ([baseValue hasPrefix:@"EnrichedCheckbox"]) {
+    if (level <= 0) {
+      return baseValue;
+    }
+    return [NSString stringWithFormat:@"%@:%ld", baseValue, (long)level];
+  }
+
+  if (contextId.length > 0) {
+    return [NSString
+        stringWithFormat:@"%@:%ld:%@", baseValue, (long)level, contextId];
+  }
+
+  if (level <= 0) {
+    return baseValue;
+  }
+  return [NSString stringWithFormat:@"%@:%ld", baseValue, (long)level];
+}
+
 using namespace facebook::react;
 
 @interface EnrichedTextInputView () <
     RCTEnrichedTextInputViewViewProtocol, UITextViewDelegate,
     UIGestureRecognizerDelegate, NSTextStorageDelegate, NSObject>
+
+- (void)adjustListLevelBy:(NSInteger)levelDelta;
+- (void)increaseListLevel;
+- (void)decreaseListLevel;
 
 @end
 
@@ -51,11 +140,13 @@ using namespace facebook::react;
   NSRange _recentlyActiveMentionRange;
   NSString *_recentlyEmittedHtml;
   BOOL _emitHtml;
+  BOOL _onChangeHtmlEventScheduled;
+  BOOL _heightUpdateScheduled;
   UILabel *_placeholderLabel;
   UIColor *_placeholderColor;
   BOOL _emitFocusBlur;
   BOOL _emitTextChange;
-  NSMutableDictionary<NSValue *, UIImageView *> *_attachmentViews;
+  NSMutableDictionary<NSString *, UIImageView *> *_attachmentViews;
   NSArray<NSDictionary *> *_contextMenuItems;
   NSString *_submitBehavior;
   NSDictionary<NSAttributedStringKey, id> *_capturedAttributesBeforeChange;
@@ -134,6 +225,8 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
   _recentInputString = @"";
   _recentlyEmittedHtml = @"<html>\n<p></p>\n</html>";
   _emitHtml = NO;
+  _onChangeHtmlEventScheduled = NO;
+  _heightUpdateScheduled = NO;
   blockEmitting = NO;
   _emitFocusBlur = YES;
   _emitTextChange = NO;
@@ -948,6 +1041,10 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
 }
 
 - (void)tryUpdatingHeight {
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector(tryUpdatingHeight)
+                                             object:nil];
+  _heightUpdateScheduled = NO;
   if (_state == nullptr) {
     return;
   }
@@ -955,6 +1052,20 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
   auto selfRef = wrapManagedObjectWeakly(self);
   _state->updateState(
       EnrichedTextInputViewState(_componentViewHeightUpdateCounter, selfRef));
+}
+
+- (void)scheduleUpdatingHeight {
+  if (_state == nullptr) {
+    return;
+  }
+
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector(tryUpdatingHeight)
+                                             object:nil];
+  _heightUpdateScheduled = YES;
+  [self performSelector:@selector(tryUpdatingHeight)
+             withObject:nil
+             afterDelay:EnrichedHeightChangeDebounceDelay];
 }
 
 // MARK: - Active styles
@@ -1122,8 +1233,6 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
     _recentlyActiveMentionParams = detectedMentionParams;
     _recentlyActiveMentionRange = detectedMentionRange;
   }
-  // emit onChangeHtml event if needed
-  [self tryEmittingOnChangeHtmlEvent];
 }
 
 - (bool)isStyleActive:(StyleType)type {
@@ -1212,6 +1321,10 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
   } else if ([commandName isEqualToString:@"toggleCheckboxList"]) {
     BOOL checked = [args[0] boolValue];
     [self toggleCheckboxList:checked];
+  } else if ([commandName isEqualToString:@"increaseListLevel"]) {
+    [self increaseListLevel];
+  } else if ([commandName isEqualToString:@"decreaseListLevel"]) {
+    [self decreaseListLevel];
   } else if ([commandName isEqualToString:@"toggleBlockQuote"]) {
     [self toggleRegularStyle:[BlockQuoteStyle getType]];
   } else if ([commandName isEqualToString:@"toggleCodeBlock"]) {
@@ -1393,7 +1506,27 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
   }
 }
 
+- (void)scheduleEmittingOnChangeHtmlEvent {
+  if (!_emitHtml || textView.markedTextRange != nullptr) {
+    return;
+  }
+
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector
+                                           (tryEmittingOnChangeHtmlEvent)
+                                             object:nil];
+  _onChangeHtmlEventScheduled = YES;
+  [self performSelector:@selector(tryEmittingOnChangeHtmlEvent)
+             withObject:nil
+             afterDelay:EnrichedHtmlChangeDebounceDelay];
+}
+
 - (void)tryEmittingOnChangeHtmlEvent {
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector
+                                           (tryEmittingOnChangeHtmlEvent)
+                                             object:nil];
+  _onChangeHtmlEventScheduled = NO;
   if (!_emitHtml || textView.markedTextRange != nullptr) {
     return;
   }
@@ -1464,6 +1597,160 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
     [style toggleWithChecked:checked range:range];
     [self anyTextMayHaveBeenModified];
   }
+}
+
+- (void)adjustListLevelBy:(NSInteger)levelDelta {
+  NSRange range = [textView.textStorage.string
+      paragraphRangeForRange:textView.selectedRange];
+  __block BOOL didChange = NO;
+
+  [textView.textStorage
+      enumerateAttribute:NSParagraphStyleAttributeName
+                 inRange:range
+                 options:0
+              usingBlock:^(id _Nullable value, NSRange subRange,
+                           BOOL *_Nonnull stop) {
+                NSMutableParagraphStyle *pStyle =
+                    [(NSParagraphStyle *)value mutableCopy];
+                if (pStyle == nil) {
+                  return;
+                }
+
+                NSMutableArray<NSTextList *> *textLists =
+                    [pStyle.textLists mutableCopy];
+                if (textLists.count == 0) {
+                  return;
+                }
+
+                NSString *currentMarker = nil;
+                NSInteger currentLevel = -1;
+                NSInteger currentListIndex = -1;
+                NSString *currentQuoteMarker = nil;
+                NSInteger currentQuoteLevel = -1;
+                NSInteger currentQuoteIndex = -1;
+
+                for (NSUInteger index = 0; index < textLists.count; index++) {
+                  NSTextList *textList = textLists[index];
+                  NSString *candidate = textList.markerFormat;
+                  if (EnrichedEditorMarkerIsBlockQuote(candidate)) {
+                    currentQuoteMarker = candidate;
+                    currentQuoteLevel = EnrichedEditorListLevel(candidate);
+                    currentQuoteIndex = (NSInteger)index;
+                    continue;
+                  }
+
+                  if (EnrichedEditorListFamily(candidate) == nil) {
+                    continue;
+                  }
+
+                  NSInteger candidateLevel = EnrichedEditorListLevel(candidate);
+                  if (candidateLevel >= currentLevel) {
+                    currentMarker = candidate;
+                    currentLevel = candidateLevel;
+                    currentListIndex = (NSInteger)index;
+                  }
+                }
+
+                BOOL shouldAdjustQuote = currentQuoteMarker != nil &&
+                                         (currentMarker == nil ||
+                                          currentListIndex < currentQuoteIndex);
+                if (currentMarker == nil && !shouldAdjustQuote) {
+                  return;
+                }
+
+                NSMutableArray<NSTextList *> *updatedTextLists =
+                    [[NSMutableArray alloc] init];
+
+                if (shouldAdjustQuote) {
+                  NSInteger nextQuoteLevel = currentQuoteLevel + levelDelta;
+                  if (nextQuoteLevel == currentQuoteLevel) {
+                    return;
+                  }
+
+                  for (NSTextList *textList in textLists) {
+                    if (EnrichedEditorMarkerIsBlockQuote(
+                            textList.markerFormat)) {
+                      continue;
+                    }
+                    [updatedTextLists addObject:textList];
+                  }
+
+                  if (nextQuoteLevel >= 0) {
+                    NSString *nextMarker = EnrichedEditorMarkerWithLevel(
+                        EnrichedEditorMarkerBase(currentQuoteMarker),
+                        nextQuoteLevel,
+                        EnrichedEditorListContext(currentQuoteMarker));
+                    [updatedTextLists
+                        addObject:[[NSTextList alloc]
+                                      initWithMarkerFormat:nextMarker
+                                                   options:0]];
+                  }
+                } else {
+                  NSInteger nextLevel = MAX(0, currentLevel + levelDelta);
+                  if (nextLevel == currentLevel) {
+                    return;
+                  }
+
+                  NSString *family = EnrichedEditorListFamily(currentMarker);
+                  NSString *nextMarker = EnrichedEditorMarkerWithLevel(
+                      EnrichedEditorMarkerBase(currentMarker), nextLevel,
+                      EnrichedEditorListContext(currentMarker));
+
+                  for (NSTextList *textList in textLists) {
+                    NSString *markerFamily =
+                        EnrichedEditorListFamily(textList.markerFormat);
+                    if (markerFamily != nil &&
+                        [markerFamily isEqualToString:family]) {
+                      continue;
+                    }
+                    [updatedTextLists addObject:textList];
+                  }
+                  [updatedTextLists
+                      addObject:[[NSTextList alloc]
+                                    initWithMarkerFormat:nextMarker
+                                                 options:0]];
+                }
+
+                pStyle.textLists = updatedTextLists;
+                [textView.textStorage addAttribute:NSParagraphStyleAttributeName
+                                             value:pStyle
+                                             range:subRange];
+                didChange = YES;
+              }];
+
+  if (didChange) {
+    [attributesManager addDirtyRange:range];
+
+    if (textView.textStorage.length > 0) {
+      NSUInteger styleLocation =
+          MIN(textView.selectedRange.location, textView.textStorage.length - 1);
+      NSParagraphStyle *paragraphStyle =
+          [textView.textStorage attribute:NSParagraphStyleAttributeName
+                                  atIndex:styleLocation
+                           effectiveRange:nil];
+      if (paragraphStyle != nil) {
+        NSMutableDictionary *typingAttributes =
+            [textView.typingAttributes mutableCopy];
+        NSMutableParagraphStyle *typingParagraphStyle =
+            [typingAttributes[NSParagraphStyleAttributeName] mutableCopy]
+                ?: [[NSMutableParagraphStyle alloc] init];
+        typingParagraphStyle.textLists = paragraphStyle.textLists;
+        typingParagraphStyle.alignment = paragraphStyle.alignment;
+        typingAttributes[NSParagraphStyleAttributeName] = typingParagraphStyle;
+        textView.typingAttributes = typingAttributes;
+      }
+    }
+
+    [self anyTextMayHaveBeenModified];
+  }
+}
+
+- (void)increaseListLevel {
+  [self adjustListLevelBy:1];
+}
+
+- (void)decreaseListLevel {
+  [self adjustListLevelBy:-1];
 }
 
 - (void)addLinkAt:(NSInteger)start
@@ -1668,26 +1955,34 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
     }
   }
 
-  if (![textView.textStorage.string isEqualToString:_recentInputString]) {
+  BOOL inputTextChanged =
+      ![textView.textStorage.string isEqualToString:_recentInputString];
+  if (inputTextChanged) {
+    NSString *currentInputString = [textView.textStorage.string copy];
+
     // emit onChangeText event
     auto emitter = [self getEventEmitter];
     if (emitter != nullptr && _emitTextChange) {
-      // set the recent input string only if the emitter is defined
-      _recentInputString = [textView.textStorage.string copy];
-
       // emit string without zero width spaces
-      NSString *stringToBeEmitted = [[textView.textStorage.string
-          stringByReplacingOccurrencesOfString:@"\u200B"
-                                    withString:@""] copy];
+      NSString *stringToBeEmitted =
+          [[currentInputString stringByReplacingOccurrencesOfString:@"\u200B"
+                                                         withString:@""] copy];
 
       emitter->onChangeText({.value = [stringToBeEmitted toCppString]});
     }
+
+    _recentInputString = currentInputString;
   }
   // all the visible (not meta) attributes handling in the ranges that could
   // have changed
   [attributesManager handleDirtyRangesStyling];
-  // update height on each character change
-  [self tryUpdatingHeight];
+  // Serialising the whole document to HTML is expensive. Schedule it only from
+  // content/style mutation paths and coalesce rapid typing into one event.
+  [self scheduleEmittingOnChangeHtmlEvent];
+  // Updating height asks Fabric to measure the whole attributed string.
+  // Coalesce rapid edits so typing does not request full-document measurement
+  // per key.
+  [self scheduleUpdatingHeight];
   // update active styles as well
   [self tryUpdatingActiveStyles];
   [self layoutAttachments];
@@ -1695,8 +1990,8 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
   [self scheduleRelayoutIfNeeded];
 }
 
-// Debounced relayout helper - coalesces multiple requests into one per runloop
-// tick
+// Debounced relayout helper - coalesces rapid edit/layout requests into one
+// pass per frame.
 - (void)scheduleRelayoutIfNeeded {
   // Cancel any previously scheduled invocation to debounce
   [NSObject cancelPreviousPerformRequestsWithTarget:self
@@ -1705,7 +2000,7 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
   // Schedule on next runloop cycle
   [self performSelector:@selector(_performRelayout)
              withObject:nil
-             afterDelay:0];
+             afterDelay:EnrichedRelayoutDebounceDelay];
 }
 
 - (void)_performRelayout {
@@ -1713,24 +2008,9 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
     return;
   }
 
-  dispatch_async(dispatch_get_main_queue(), ^{
-    NSRange wholeRange =
-        NSMakeRange(0, self->textView.textStorage.string.length);
-    NSRange actualRange = NSMakeRange(0, 0);
-    [self->textView.layoutManager
-        invalidateLayoutForCharacterRange:wholeRange
-                     actualCharacterRange:&actualRange];
-    [self->textView.layoutManager ensureLayoutForCharacterRange:actualRange];
-    [self->textView.layoutManager
-        invalidateDisplayForCharacterRange:wholeRange];
-
-    // We have to explicitly set contentSize
-    // That way textView knows if content overflows and if should be scrollable
-    // We recall measureSize here because value returned from previous
-    // measureSize may not be up-to date at that point
-    CGSize measuredSize = [self measureSize:self->textView.frame.size.width];
-    self->textView.contentSize = measuredSize;
-  });
+  NSRange wholeRange = NSMakeRange(0, textView.textStorage.string.length);
+  [textView.layoutManager invalidateDisplayForCharacterRange:wholeRange];
+  [self layoutAttachments];
 }
 
 - (void)didMoveToWindow {
@@ -1764,6 +2044,14 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
 }
 
 - (void)textViewDidEndEditing:(UITextView *)textView {
+  if (_heightUpdateScheduled) {
+    [self tryUpdatingHeight];
+  }
+
+  if (_onChangeHtmlEventScheduled) {
+    [self tryEmittingOnChangeHtmlEvent];
+  }
+
   auto emitter = [self getEventEmitter];
   if (emitter != nullptr && _emitFocusBlur) {
     // send onBlur event

@@ -5,5 +5,6 @@
 
 @property(nonatomic, assign) NSRange range;
 @property(nonatomic, assign) NSTextAlignment alignment;
+@property(nonatomic, assign) BOOL expandListRange;
 
 @end

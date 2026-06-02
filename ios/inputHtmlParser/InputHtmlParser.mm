@@ -129,9 +129,8 @@
         NSMakeRange(offset + zeroWidthSpaceOffset + parsedRange.location,
                     parsedRange.length);
 
-    BOOL shouldAddTypingAttr =
-        styleRange.location + styleRange.length ==
-        plainTextLength + offset + zeroWidthSpaceOffset;
+    BOOL shouldAddTypingAttr = styleRange.location + styleRange.length ==
+                               plainTextLength + offset + zeroWidthSpaceOffset;
 
     if ([styleType isEqualToNumber:@([LinkStyle getType])]) {
       LinkData *linkData = (LinkData *)stylePair.styleValue;
@@ -140,8 +139,7 @@
                           withSelection:NO];
     } else if ([styleType isEqualToNumber:@([MentionStyle getType])]) {
       MentionParams *params = (MentionParams *)stylePair.styleValue;
-      [((MentionStyle *)baseStyle) addMentionAtRange:styleRange
-                                              params:params];
+      [((MentionStyle *)baseStyle) addMentionAtRange:styleRange params:params];
     } else if ([styleType isEqualToNumber:@([ImageStyle getType])]) {
       ImageData *imgData = (ImageData *)stylePair.styleValue;
       [((ImageStyle *)baseStyle) addImageAtRange:styleRange
@@ -149,24 +147,34 @@
                                    withSelection:NO
                                   withDirtyRange:YES];
     } else if ([styleType isEqualToNumber:@([CheckboxListStyle getType])]) {
-      NSDictionary *checkboxStates = (NSDictionary *)stylePair.styleValue;
       CheckboxListStyle *cbLStyle = (CheckboxListStyle *)baseStyle;
 
-      // First apply the checkbox list style to the entire range with
-      // unchecked value
-      [cbLStyle addWithChecked:NO
-                         range:styleRange
-                    withTyping:shouldAddTypingAttr
-                withDirtyRange:YES];
+      if ([stylePair.styleValue isKindOfClass:[NSString class]]) {
+        [cbLStyle add:styleRange
+                 withValue:(NSString *)stylePair.styleValue
+                withTyping:shouldAddTypingAttr
+            withDirtyRange:YES];
+      } else {
+        NSDictionary *checkboxStates =
+            [stylePair.styleValue isKindOfClass:[NSDictionary class]]
+                ? (NSDictionary *)stylePair.styleValue
+                : nil;
 
-      if (checkboxStates && checkboxStates.count > 0) {
-        // Then toggle checked checkboxes
-        for (NSNumber *key in checkboxStates) {
-          NSUInteger checkboxPosition =
-              offset + zeroWidthSpaceOffset + [key unsignedIntegerValue];
-          BOOL isChecked = [checkboxStates[key] boolValue];
-          if (isChecked) {
-            [cbLStyle toggleCheckedAt:checkboxPosition withDirtyRange:YES];
+        // Legacy checkbox-list payloads apply the container first, then toggle
+        // individual checked rows.
+        [cbLStyle addWithChecked:NO
+                           range:styleRange
+                      withTyping:shouldAddTypingAttr
+                  withDirtyRange:YES];
+
+        if (checkboxStates && checkboxStates.count > 0) {
+          for (NSNumber *key in checkboxStates) {
+            NSUInteger checkboxPosition =
+                offset + zeroWidthSpaceOffset + [key unsignedIntegerValue];
+            BOOL isChecked = [checkboxStates[key] boolValue];
+            if (isChecked) {
+              [cbLStyle toggleCheckedAt:checkboxPosition withDirtyRange:YES];
+            }
           }
         }
       }
@@ -177,18 +185,18 @@
               ? (NSString *)stylePair.styleValue
               : [baseStyle getValue];
       [baseStyle add:styleRange
-             withValue:markerValue
-            withTyping:shouldAddTypingAttr
-        withDirtyRange:YES];
+               withValue:markerValue
+              withTyping:shouldAddTypingAttr
+          withDirtyRange:YES];
     } else if ([styleType isEqualToNumber:@([BlockQuoteStyle getType])]) {
       NSString *markerValue =
           [stylePair.styleValue isKindOfClass:[NSString class]]
               ? (NSString *)stylePair.styleValue
               : [baseStyle getValue];
       [baseStyle add:styleRange
-             withValue:markerValue
-            withTyping:shouldAddTypingAttr
-        withDirtyRange:YES];
+               withValue:markerValue
+              withTyping:shouldAddTypingAttr
+          withDirtyRange:YES];
     } else {
       [baseStyle add:styleRange
               withTyping:shouldAddTypingAttr
@@ -223,7 +231,9 @@
     [alignmentStyle addAlignment:entry.alignment
                            range:finalRange
                       withTyping:NO
-                  withDirtyRange:NO];
+                  withDirtyRange:NO
+                 expandListRange:entry.expandListRange];
+    [alignmentStyle applyStyling:finalRange];
   }
 }
 

@@ -5,6 +5,7 @@
 
 @property(nonatomic, strong) ImageData *imageData;
 @property(nonatomic, strong) UIImage *storedAnimatedImage;
+@property(nonatomic, assign) BOOL requiresOverlayRendering;
 
 - (instancetype)initWithImageData:(ImageData *)data;
 

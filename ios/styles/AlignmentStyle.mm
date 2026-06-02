@@ -63,12 +63,76 @@
                range:(NSRange)range
           withTyping:(BOOL)withTyping
       withDirtyRange:(BOOL)withDirtyRange {
+  [self addAlignment:alignment
+                range:range
+           withTyping:withTyping
+       withDirtyRange:withDirtyRange
+      expandListRange:YES];
+}
+
+- (void)addAlignment:(NSTextAlignment)alignment
+               range:(NSRange)range
+          withTyping:(BOOL)withTyping
+      withDirtyRange:(BOOL)withDirtyRange
+     expandListRange:(BOOL)expandListRange {
   NSString *value = [AlignmentUtils alignmentToMarker:alignment];
 
-  [self add:range
-           withValue:value
-          withTyping:withTyping
-      withDirtyRange:withDirtyRange];
+  if (expandListRange) {
+    [self add:range
+             withValue:value
+            withTyping:withTyping
+        withDirtyRange:withDirtyRange];
+    return;
+  }
+
+  NSString *text = self.host.textView.textStorage.string;
+  if (text.length == 0)
+    return;
+
+  NSRange paragraphRange = [text paragraphRangeForRange:range];
+
+  [self.host.textView.textStorage
+      enumerateAttribute:NSParagraphStyleAttributeName
+                 inRange:paragraphRange
+                 options:0
+              usingBlock:^(id _Nullable existingValue, NSRange subRange,
+                           BOOL *_Nonnull stop) {
+                NSMutableParagraphStyle *pStyle =
+                    [(NSParagraphStyle *)existingValue mutableCopy];
+                if (pStyle == nullptr)
+                  return;
+
+                NSMutableArray<NSTextList *> *textLists =
+                    [pStyle.textLists mutableCopy];
+                if (textLists == nullptr) {
+                  textLists = [[NSMutableArray alloc] init];
+                }
+
+                NSIndexSet *matchingIndexes = [textLists
+                    indexesOfObjectsPassingTest:^BOOL(
+                        NSTextList *textList, NSUInteger idx, BOOL *stop) {
+                      return [self matchesParagraphMarker:textList.markerFormat
+                                                    value:value];
+                    }];
+                [textLists removeObjectsAtIndexes:matchingIndexes];
+                [textLists
+                    addObject:[[NSTextList alloc] initWithMarkerFormat:value
+                                                               options:0]];
+                pStyle.textLists = textLists;
+                [self.host.textView.textStorage
+                    addAttribute:NSParagraphStyleAttributeName
+                           value:pStyle
+                           range:subRange];
+              }];
+
+  if (withTyping) {
+    [self addTypingWithValue:value];
+  }
+
+  if (withDirtyRange &&
+      [self.host respondsToSelector:@selector(attributesManager)]) {
+    [self.host.attributesManager addDirtyRange:paragraphRange];
+  }
 }
 
 - (BOOL)styleCondition:(id)value range:(NSRange)range {
@@ -77,6 +141,12 @@
     return NO;
   return [TextListsUtils textLists:pStyle.textLists
                     containsPrefix:[self getMarkerPrefix]];
+}
+
+- (BOOL)matchesParagraphMarker:(NSString *)markerFormat
+                         value:(NSString *)value {
+  return markerFormat != nullptr &&
+         [markerFormat hasPrefix:[self getMarkerPrefix]];
 }
 
 - (void)reapplyFromStylePair:(StylePair *)pair {

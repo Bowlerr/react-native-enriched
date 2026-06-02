@@ -95,6 +95,11 @@
                range:(NSRange)range
           withTyping:(BOOL)withTyping
       withDirtyRange:(BOOL)withDirtyRange;
+- (void)addAlignment:(NSTextAlignment)alignment
+               range:(NSRange)range
+          withTyping:(BOOL)withTyping
+      withDirtyRange:(BOOL)withDirtyRange
+     expandListRange:(BOOL)expandListRange;
 - (NSString *)getStyleState;
 @end
 

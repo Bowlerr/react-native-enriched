@@ -98,22 +98,33 @@
                                withSelection:NO
                               withDirtyRange:NO];
     } else if ([styleType isEqualToNumber:@([CheckboxListStyle getType])]) {
-      NSDictionary *checkboxStates = (NSDictionary *)stylePair.styleValue;
       CheckboxListStyle *cbStyle = (CheckboxListStyle *)style;
 
-      [cbStyle addWithChecked:NO
-                        range:styleRange
-                   withTyping:NO
-               withDirtyRange:NO];
+      if ([stylePair.styleValue isKindOfClass:[NSString class]]) {
+        [cbStyle add:styleRange
+                 withValue:(NSString *)stylePair.styleValue
+                withTyping:NO
+            withDirtyRange:NO];
+      } else {
+        NSDictionary *checkboxStates =
+            [stylePair.styleValue isKindOfClass:[NSDictionary class]]
+                ? (NSDictionary *)stylePair.styleValue
+                : nil;
 
-      if (checkboxStates && checkboxStates.count > 0) {
-        for (NSNumber *key in checkboxStates) {
-          NSUInteger checkboxPosition =
-              zeroWidthSpaceOffset + [key unsignedIntegerValue];
-          BOOL isChecked = [checkboxStates[key] boolValue];
+        [cbStyle addWithChecked:NO
+                          range:styleRange
+                     withTyping:NO
+                 withDirtyRange:NO];
 
-          if (isChecked) {
-            [cbStyle toggleCheckedAt:checkboxPosition withDirtyRange:NO];
+        if (checkboxStates && checkboxStates.count > 0) {
+          for (NSNumber *key in checkboxStates) {
+            NSUInteger checkboxPosition =
+                zeroWidthSpaceOffset + [key unsignedIntegerValue];
+            BOOL isChecked = [checkboxStates[key] boolValue];
+
+            if (isChecked) {
+              [cbStyle toggleCheckedAt:checkboxPosition withDirtyRange:NO];
+            }
           }
         }
       }
@@ -124,18 +135,18 @@
               ? (NSString *)stylePair.styleValue
               : [style getValue];
       [style add:styleRange
-             withValue:markerValue
-            withTyping:NO
-        withDirtyRange:NO];
+               withValue:markerValue
+              withTyping:NO
+          withDirtyRange:NO];
     } else if ([styleType isEqualToNumber:@([BlockQuoteStyle getType])]) {
       NSString *markerValue =
           [stylePair.styleValue isKindOfClass:[NSString class]]
               ? (NSString *)stylePair.styleValue
               : [style getValue];
       [style add:styleRange
-             withValue:markerValue
-            withTyping:NO
-        withDirtyRange:NO];
+               withValue:markerValue
+              withTyping:NO
+          withDirtyRange:NO];
     } else {
       [style add:styleRange withTyping:NO withDirtyRange:NO];
     }
@@ -152,13 +163,12 @@
     NSRange adjustedStyleRange = NSMakeRange(
         styleRange.location, styleRange.length + (NSUInteger)MAX(0LL, delta));
 
-    BOOL isHeadingStyle =
-        [styleType isEqualToNumber:@([H1Style getType])] ||
-        [styleType isEqualToNumber:@([H2Style getType])] ||
-        [styleType isEqualToNumber:@([H3Style getType])] ||
-        [styleType isEqualToNumber:@([H4Style getType])] ||
-        [styleType isEqualToNumber:@([H5Style getType])] ||
-        [styleType isEqualToNumber:@([H6Style getType])];
+    BOOL isHeadingStyle = [styleType isEqualToNumber:@([H1Style getType])] ||
+                          [styleType isEqualToNumber:@([H2Style getType])] ||
+                          [styleType isEqualToNumber:@([H3Style getType])] ||
+                          [styleType isEqualToNumber:@([H4Style getType])] ||
+                          [styleType isEqualToNumber:@([H5Style getType])] ||
+                          [styleType isEqualToNumber:@([H6Style getType])];
 
     if ([style isParagraph]) {
       if (isHeadingStyle) {
@@ -224,7 +234,8 @@
     [alignmentStyle addAlignment:entry.alignment
                            range:finalRange
                       withTyping:NO
-                  withDirtyRange:NO];
+                  withDirtyRange:NO
+                 expandListRange:entry.expandListRange];
     [alignmentStyle applyStyling:finalRange];
   }
 }

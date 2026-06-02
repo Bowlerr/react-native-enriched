@@ -48,6 +48,22 @@ static NSInteger EnrichedBlockQuoteListLevel(NSString *markerFormat,
   return MAX(0, [levelString integerValue]);
 }
 
+static NSInteger EnrichedBlockQuoteCheckboxLevel(NSString *markerFormat) {
+  if (markerFormat == nullptr ||
+      ![markerFormat hasPrefix:@"EnrichedCheckbox"]) {
+    return -1;
+  }
+
+  NSRange separator = [markerFormat rangeOfString:@":"];
+  if (separator.location == NSNotFound) {
+    return 0;
+  }
+
+  NSString *levelString =
+      [markerFormat substringFromIndex:separator.location + separator.length];
+  return MAX(0, [levelString integerValue]);
+}
+
 static BOOL EnrichedBlockQuoteHasNestedLayoutMarker(NSParagraphStyle *pStyle) {
   for (NSTextList *textList in pStyle.textLists) {
     NSString *markerFormat = textList.markerFormat;
@@ -64,14 +80,20 @@ static BOOL EnrichedBlockQuoteHasNestedLayoutMarker(NSParagraphStyle *pStyle) {
 }
 
 static NSString *EnrichedBlockQuoteMarker(NSParagraphStyle *pStyle) {
+  NSString *marker = nil;
+  NSInteger markerLevel = -1;
+
   for (NSTextList *textList in pStyle.textLists) {
     NSString *markerFormat = textList.markerFormat;
-    if (EnrichedBlockQuoteListMarkerMatches(markerFormat,
-                                            @"EnrichedBlockQuote")) {
-      return markerFormat;
+    NSInteger currentLevel =
+        EnrichedBlockQuoteListLevel(markerFormat, @"EnrichedBlockQuote");
+    if (currentLevel >= 0 && currentLevel >= markerLevel) {
+      marker = markerFormat;
+      markerLevel = currentLevel;
     }
   }
-  return nil;
+
+  return marker;
 }
 
 + (StyleType)getType {
@@ -87,7 +109,7 @@ static NSString *EnrichedBlockQuoteMarker(NSParagraphStyle *pStyle) {
 }
 
 - (BOOL)matchesParagraphMarker:(NSString *)markerFormat
-                          value:(NSString *)value {
+                         value:(NSString *)value {
   return EnrichedBlockQuoteListMarkerMatches(markerFormat,
                                              @"EnrichedBlockQuote") &&
          EnrichedBlockQuoteListMarkerMatches(value, @"EnrichedBlockQuote");
@@ -98,8 +120,9 @@ static NSString *EnrichedBlockQuoteMarker(NSParagraphStyle *pStyle) {
 }
 
 - (void)applyStyling:(NSRange)range {
-  CGFloat blockquoteIndent = [self.host.config blockquoteBorderWidth] +
-                             [self.host.config blockquoteGapWidth];
+  CGFloat blockquoteIndentUnit = [self.host.config blockquoteBorderWidth] +
+                                 [self.host.config blockquoteGapWidth];
+  CGFloat codeBlockIndent = 12.0;
   [self.host.textView.textStorage
       enumerateAttribute:NSParagraphStyleAttributeName
                  inRange:range
@@ -109,37 +132,60 @@ static NSString *EnrichedBlockQuoteMarker(NSParagraphStyle *pStyle) {
                 NSMutableParagraphStyle *pStyle =
                     value != nullptr ? [(NSParagraphStyle *)value mutableCopy]
                                      : [[NSMutableParagraphStyle alloc] init];
+                NSString *quoteMarker = EnrichedBlockQuoteMarker(pStyle);
+                NSInteger quoteLevel =
+                    MAX(0, EnrichedBlockQuoteListLevel(quoteMarker,
+                                                       @"EnrichedBlockQuote"));
+                CGFloat blockquoteIndent =
+                    blockquoteIndentUnit * (quoteLevel + 1);
                 CGFloat listIndent = 0.0;
+                BOOL hasNestedLayoutMarker = NO;
                 for (NSTextList *textList in pStyle.textLists) {
                   NSString *markerFormat = textList.markerFormat;
                   NSInteger unorderedLevel = EnrichedBlockQuoteListLevel(
                       markerFormat, @"EnrichedUnorderedList");
                   if (unorderedLevel >= 0) {
-                    listIndent = MAX(
-                        listIndent,
-                        [self.host.config unorderedListMarginLeft] *
-                                (unorderedLevel + 1) +
-                            [self.host.config unorderedListGapWidth]);
+                    hasNestedLayoutMarker = YES;
+                    listIndent =
+                        MAX(listIndent,
+                            [self.host.config unorderedListMarginLeft] *
+                                    (unorderedLevel + 1) +
+                                [self.host.config unorderedListGapWidth]);
                   }
 
                   NSInteger orderedLevel = EnrichedBlockQuoteListLevel(
                       markerFormat, @"EnrichedOrderedList");
                   if (orderedLevel >= 0) {
+                    hasNestedLayoutMarker = YES;
                     listIndent = MAX(
-                        listIndent,
-                        [self.host.config orderedListMarginLeft] *
-                                (orderedLevel + 1) +
-                            [self.host.config orderedListGapWidth]);
+                        listIndent, [self.host.config orderedListMarginLeft] *
+                                            (orderedLevel + 1) +
+                                        [self.host.config orderedListGapWidth]);
+                  }
+
+                  NSInteger checkboxLevel =
+                      EnrichedBlockQuoteCheckboxLevel(markerFormat);
+                  if (checkboxLevel >= 0) {
+                    hasNestedLayoutMarker = YES;
+                    listIndent =
+                        MAX(listIndent,
+                            [self.host.config checkboxListMarginLeft] *
+                                    (checkboxLevel + 1) +
+                                [self.host.config checkboxListGapWidth] +
+                                [self.host.config checkboxListBoxSize]);
+                  }
+
+                  if ([markerFormat isEqualToString:@"EnrichedCodeBlock"]) {
+                    hasNestedLayoutMarker = YES;
+                    listIndent = MAX(listIndent, codeBlockIndent);
                   }
                 }
 
-                CGFloat existingIndent =
-                    MAX(pStyle.headIndent, pStyle.firstLineHeadIndent);
-                CGFloat indent = MAX(existingIndent, listIndent) +
+                CGFloat indent = (hasNestedLayoutMarker ? listIndent : 0.0) +
                                  blockquoteIndent;
                 pStyle.headIndent = indent;
                 pStyle.firstLineHeadIndent = indent;
-                if (!EnrichedBlockQuoteHasNestedLayoutMarker(pStyle)) {
+                if (!hasNestedLayoutMarker) {
                   pStyle.paragraphSpacingBefore =
                       MAX(pStyle.paragraphSpacingBefore, 4.0);
                   pStyle.paragraphSpacing = MAX(pStyle.paragraphSpacing, 6.0);

@@ -53,9 +53,10 @@ static NSString *const MentionAttributeName = @"EnrichedMention";
     NSForegroundColorAttributeName : styleProps.color,
     NSUnderlineColorAttributeName : styleProps.color,
     NSStrikethroughColorAttributeName : styleProps.color,
-    NSBackgroundColorAttributeName :
-        [styleProps.backgroundColor colorWithAlphaIfNotTransparent:0.4],
   } mutableCopy];
+
+  [self.host.textView.textStorage removeAttribute:NSBackgroundColorAttributeName
+                                            range:range];
 
   if (styleProps.decorationLine == DecorationUnderline) {
     newAttrs[NSUnderlineStyleAttributeName] = @(NSUnderlineStyleSingle);

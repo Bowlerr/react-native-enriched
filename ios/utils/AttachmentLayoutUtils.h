@@ -9,11 +9,11 @@
                       textView:(UITextView *)textView
                  onLayoutBlock:(dispatch_block_t)layoutBlock;
 
-+ (NSMutableDictionary<NSValue *, UIImageView *> *)
++ (NSMutableDictionary<NSString *, UIImageView *> *)
     layoutAttachmentsInTextView:(UITextView *)textView
                          config:(EnrichedConfig *)config
                   existingViews:
-                      (NSMutableDictionary<NSValue *, UIImageView *> *)
+                      (NSMutableDictionary<NSString *, UIImageView *> *)
                           attachmentViews;
 
 + (CGRect)frameForAttachment:(ImageAttachment *)attachment

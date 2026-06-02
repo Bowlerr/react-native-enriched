@@ -26,7 +26,7 @@ using namespace facebook::react;
 
 @implementation EnrichedTextView {
   EnrichedTextViewShadowNode::ConcreteState::Shared _state;
-  NSMutableDictionary<NSValue *, UIImageView *> *_attachmentViews;
+  NSMutableDictionary<NSString *, UIImageView *> *_attachmentViews;
   EnrichedTextTouchHandler *_touchHandler;
   TextHtmlParser *_textParser;
 }

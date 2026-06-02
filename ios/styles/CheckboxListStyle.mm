@@ -8,6 +8,12 @@ static BOOL EnrichedCheckboxMarkerMatches(NSString *markerFormat) {
          [markerFormat hasPrefix:@"EnrichedCheckbox"];
 }
 
+static BOOL EnrichedCheckboxDrawableMarkerMatches(NSString *markerFormat) {
+  return markerFormat != nullptr &&
+         ([markerFormat hasPrefix:@"EnrichedCheckbox0"] ||
+          [markerFormat hasPrefix:@"EnrichedCheckbox1"]);
+}
+
 static BOOL EnrichedCheckboxMarkerIsChecked(NSString *markerFormat) {
   return markerFormat != nullptr &&
          [markerFormat hasPrefix:@"EnrichedCheckbox1"];
@@ -31,6 +37,51 @@ static NSInteger EnrichedCheckboxLevelInParagraph(NSParagraphStyle *pStyle) {
   for (NSTextList *textList in pStyle.textLists) {
     NSInteger markerLevel =
         EnrichedCheckboxLevelFromMarker(textList.markerFormat);
+    if (markerLevel > level) {
+      level = markerLevel;
+    }
+  }
+  return level;
+}
+
+static BOOL EnrichedCheckboxBlockQuoteMarkerMatches(NSString *markerFormat,
+                                                    NSString *baseValue) {
+  if (markerFormat == nullptr) {
+    return NO;
+  }
+
+  NSString *continuationBaseValue =
+      [baseValue stringByAppendingString:@"Continuation"];
+  return [markerFormat isEqualToString:baseValue] ||
+         [markerFormat hasPrefix:[baseValue stringByAppendingString:@":"]] ||
+         [markerFormat isEqualToString:continuationBaseValue] ||
+         [markerFormat
+             hasPrefix:[continuationBaseValue stringByAppendingString:@":"]];
+}
+
+static NSInteger
+EnrichedCheckboxBlockQuoteLevelFromMarker(NSString *markerFormat) {
+  if (!EnrichedCheckboxBlockQuoteMarkerMatches(markerFormat,
+                                               @"EnrichedBlockQuote")) {
+    return -1;
+  }
+
+  NSRange separator = [markerFormat rangeOfString:@":"];
+  if (separator.location == NSNotFound) {
+    return 0;
+  }
+
+  NSString *levelString =
+      [markerFormat substringFromIndex:separator.location + separator.length];
+  return MAX(0, [levelString integerValue]);
+}
+
+static NSInteger
+EnrichedCheckboxParagraphBlockQuoteLevel(NSParagraphStyle *pStyle) {
+  NSInteger level = -1;
+  for (NSTextList *textList in pStyle.textLists) {
+    NSInteger markerLevel =
+        EnrichedCheckboxBlockQuoteLevelFromMarker(textList.markerFormat);
     if (markerLevel > level) {
       level = markerLevel;
     }
@@ -78,8 +129,17 @@ static NSInteger EnrichedCheckboxLevelInParagraph(NSParagraphStyle *pStyle) {
                 NSMutableParagraphStyle *pStyle =
                     [(NSParagraphStyle *)value mutableCopy];
                 NSInteger level = EnrichedCheckboxLevelInParagraph(pStyle);
-                CGFloat listHeadIndent =
-                    baseMargin * (level + 1) + gapWidth + boxSize;
+                NSInteger blockquoteLevel =
+                    EnrichedCheckboxParagraphBlockQuoteLevel(pStyle);
+                CGFloat blockquoteIndentUnit =
+                    [self.host.config blockquoteBorderWidth] +
+                    [self.host.config blockquoteGapWidth];
+                CGFloat blockquoteIndent =
+                    blockquoteLevel >= 0
+                        ? blockquoteIndentUnit * (blockquoteLevel + 1)
+                        : 0.0;
+                CGFloat listHeadIndent = baseMargin * (level + 1) + gapWidth +
+                                         boxSize + blockquoteIndent;
                 pStyle.headIndent = listHeadIndent;
                 pStyle.firstLineHeadIndent = listHeadIndent;
                 [self.host.textView.textStorage
@@ -103,7 +163,7 @@ static NSInteger EnrichedCheckboxLevelInParagraph(NSParagraphStyle *pStyle) {
 }
 
 - (BOOL)matchesParagraphMarker:(NSString *)markerFormat
-                          value:(NSString *)value {
+                         value:(NSString *)value {
   return EnrichedCheckboxMarkerMatches(markerFormat);
 }
 
@@ -137,17 +197,34 @@ static NSInteger EnrichedCheckboxLevelInParagraph(NSParagraphStyle *pStyle) {
 // marker format from the saved StylePair
 - (void)reapplyFromStylePair:(StylePair *)pair {
   NSRange range = [pair.rangeValue rangeValue];
-  NSParagraphStyle *savedPStyle = (NSParagraphStyle *)pair.styleValue;
-  BOOL checked = NO;
-  if (savedPStyle != nullptr) {
+  if ([pair.styleValue isKindOfClass:[NSString class]] &&
+      EnrichedCheckboxMarkerMatches((NSString *)pair.styleValue)) {
+    [self add:range
+             withValue:(NSString *)pair.styleValue
+            withTyping:NO
+        withDirtyRange:NO];
+    return;
+  }
+
+  NSParagraphStyle *savedPStyle =
+      [pair.styleValue isKindOfClass:[NSParagraphStyle class]]
+          ? (NSParagraphStyle *)pair.styleValue
+          : nil;
+  NSString *markerFormat = nil;
+  if (savedPStyle != nil) {
     for (NSTextList *textList in savedPStyle.textLists) {
       if (EnrichedCheckboxMarkerMatches(textList.markerFormat)) {
-        checked = EnrichedCheckboxMarkerIsChecked(textList.markerFormat);
+        markerFormat = textList.markerFormat;
         break;
       }
     }
   }
-  [self addWithChecked:checked range:range withTyping:NO withDirtyRange:NO];
+
+  if (markerFormat != nil) {
+    [self add:range withValue:markerFormat withTyping:NO withDirtyRange:NO];
+  } else {
+    [self addWithChecked:NO range:range withTyping:NO withDirtyRange:NO];
+  }
 }
 
 - (void)toggleCheckedAt:(NSUInteger)location
@@ -180,7 +257,7 @@ static NSInteger EnrichedCheckboxLevelInParagraph(NSParagraphStyle *pStyle) {
 
   if (style && style.textLists.count > 0) {
     for (NSTextList *list in style.textLists) {
-      if (EnrichedCheckboxMarkerMatches(list.markerFormat)) {
+      if (EnrichedCheckboxDrawableMarkerMatches(list.markerFormat)) {
         return list.markerFormat;
       }
     }

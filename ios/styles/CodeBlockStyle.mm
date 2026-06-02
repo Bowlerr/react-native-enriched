@@ -48,8 +48,8 @@ static BOOL EnrichedCodeBlockParagraphHasVisibleContent(NSString *text,
 
 - (void)applyStyling:(NSRange)range {
   CGFloat horizontalPadding = 12.0;
-  NSArray *paragraphs = [RangeUtils getSeparateParagraphsRangesIn:self.host.textView
-                                                            range:range];
+  NSArray *paragraphs =
+      [RangeUtils getSeparateParagraphsRangesIn:self.host.textView range:range];
   NSString *text = self.host.textView.textStorage.string;
   NSRange firstVisibleParagraphRange = NSMakeRange(NSNotFound, 0);
   NSRange lastVisibleParagraphRange = NSMakeRange(NSNotFound, 0);
@@ -68,8 +68,9 @@ static BOOL EnrichedCodeBlockParagraphHasVisibleContent(NSString *text,
 
   if (firstVisibleParagraphRange.location == NSNotFound) {
     firstVisibleParagraphRange =
-        paragraphs.count > 0 ? [((NSValue *)[paragraphs firstObject]) rangeValue]
-                             : range;
+        paragraphs.count > 0
+            ? [((NSValue *)[paragraphs firstObject]) rangeValue]
+            : range;
     lastVisibleParagraphRange =
         paragraphs.count > 0 ? [((NSValue *)[paragraphs lastObject]) rangeValue]
                              : range;
@@ -101,10 +102,14 @@ static BOOL EnrichedCodeBlockParagraphHasVisibleContent(NSString *text,
         NSEqualRanges(paragraphRange, firstVisibleParagraphRange)
             ? MAX(pStyle.paragraphSpacingBefore, 6.0)
             : 0.0;
+    BOOL isLastVisibleParagraph =
+        NSEqualRanges(paragraphRange, lastVisibleParagraphRange);
+    BOOL isAtDocumentEnd =
+        NSMaxRange(paragraphRange) >= self.host.textView.textStorage.length;
+    CGFloat trailingSpacing = isAtDocumentEnd ? 28.0 : 12.0;
     pStyle.paragraphSpacing =
-        NSEqualRanges(paragraphRange, lastVisibleParagraphRange)
-            ? MAX(pStyle.paragraphSpacing, 12.0)
-            : 0.0;
+        isLastVisibleParagraph ? MAX(pStyle.paragraphSpacing, trailingSpacing)
+                               : 0.0;
     [self.host.textView.textStorage addAttribute:NSParagraphStyleAttributeName
                                            value:pStyle
                                            range:paragraphRange];
