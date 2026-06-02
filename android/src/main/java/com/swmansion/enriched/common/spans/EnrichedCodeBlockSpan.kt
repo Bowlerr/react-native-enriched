@@ -7,6 +7,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.text.Spanned
 import android.text.TextPaint
+import android.text.style.LeadingMarginSpan
 import android.text.style.LineBackgroundSpan
 import android.text.style.LineHeightSpan
 import android.text.style.MetricAffectingSpan
@@ -17,6 +18,7 @@ import com.swmansion.enriched.common.spans.interfaces.EnrichedListSpan
 open class EnrichedCodeBlockSpan(
   private val enrichedStyle: EnrichedStyle,
 ) : MetricAffectingSpan(),
+  LeadingMarginSpan,
   LineHeightSpan,
   LineBackgroundSpan,
   EnrichedBlockSpan {
@@ -27,6 +29,25 @@ open class EnrichedCodeBlockSpan(
 
   override fun updateMeasureState(paint: TextPaint) {
     paint.typeface = Typeface.MONOSPACE
+  }
+
+  override fun getLeadingMargin(first: Boolean): Int = CODE_BLOCK_HORIZONTAL_PADDING
+
+  override fun drawLeadingMargin(
+    c: Canvas,
+    p: Paint,
+    x: Int,
+    dir: Int,
+    top: Int,
+    baseline: Int,
+    bottom: Int,
+    text: CharSequence,
+    start: Int,
+    end: Int,
+    first: Boolean,
+    layout: android.text.Layout?,
+  ) {
+    // LeadingMarginSpan is used only to create internal codeblock padding.
   }
 
   override fun chooseHeight(
@@ -140,13 +161,13 @@ open class EnrichedCodeBlockSpan(
   ): Float {
     val blockInset =
       parentBlockQuoteContentIndent(text, start, end) + parentListContentIndent(text, start, end)
+    val maxLeft = (right - 1).coerceAtLeast(left)
     if (blockInset <= 0) {
-      return left.toFloat()
+      return (left - CODE_BLOCK_HORIZONTAL_PADDING).coerceIn(0, maxLeft).toFloat()
     }
 
-    val insetLeft = left + blockInset - CODE_BLOCK_HORIZONTAL_PADDING
-    val maxLeft = (right - 1).coerceAtLeast(left)
-    return insetLeft.coerceIn(left, maxLeft).toFloat()
+    val insetLeft = left + blockInset - CODE_BLOCK_HORIZONTAL_PADDING * 2
+    return insetLeft.coerceIn(0, maxLeft).toFloat()
   }
 
   private fun parentBlockQuoteContentIndent(

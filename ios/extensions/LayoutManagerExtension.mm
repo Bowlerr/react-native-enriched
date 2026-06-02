@@ -682,8 +682,9 @@ static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
   NSArray<StylePair *> *allCodeBlocks = [codeBlockStyle all:visibleCharRange];
   NSArray<StylePair *> *mergedCodeBlocks =
       [self mergeContiguousCodeBlockStylePairs:allCodeBlocks];
-  UIColor *bgColor =
-      [[host.config codeBlockBgColor] colorWithAlphaIfNotTransparent:1.0];
+  CGFloat backgroundAlpha = 80.0 / 255.0;
+  UIColor *bgColor = [[host.config codeBlockBgColor]
+      colorWithAlphaIfNotTransparent:backgroundAlpha];
   UIColor *borderColor =
       [[host.config codeBlockFgColor] colorWithAlphaIfNotTransparent:0.25];
   CGFloat radius = [host.config codeBlockBorderRadius];
