@@ -397,6 +397,14 @@ class EnrichedTextInputViewManager :
     view?.toggleCheckboxListItem(isChecked)
   }
 
+  override fun increaseListLevel(view: EnrichedTextInputView?) {
+    view?.paragraphStyles?.increaseBlockQuoteLevel()
+  }
+
+  override fun decreaseListLevel(view: EnrichedTextInputView?) {
+    view?.paragraphStyles?.decreaseBlockQuoteLevel()
+  }
+
   override fun addLink(
     view: EnrichedTextInputView?,
     start: Int,

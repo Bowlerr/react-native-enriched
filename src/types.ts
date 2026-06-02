@@ -416,6 +416,8 @@ export interface EnrichedTextInputInstance extends NativeMethods {
   toggleOrderedList: () => void;
   toggleUnorderedList: () => void;
   toggleCheckboxList: (checked: boolean) => void;
+  increaseListLevel: () => void;
+  decreaseListLevel: () => void;
   setLink: (start: number, end: number, text: string, url: string) => void;
   removeLink: (start: number, end: number) => void;
   setImage: (src: string, width: number, height: number) => void;

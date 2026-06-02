@@ -343,6 +343,18 @@ export const EnrichedTextInput = ({
         runFocused(editor, (c) => c.toggleUnorderedList()),
       toggleCheckboxList: (checked: boolean) =>
         runFocused(editor, (c) => c.toggleCheckboxList(checked)),
+      increaseListLevel: () =>
+        runFocused(editor, (c) =>
+          editor.isActive('checkboxItem')
+            ? c.sinkListItem('checkboxItem')
+            : c.sinkListItem('listItem')
+        ),
+      decreaseListLevel: () =>
+        runFocused(editor, (c) =>
+          editor.isActive('checkboxItem')
+            ? c.liftListItem('checkboxItem')
+            : c.liftListItem('listItem')
+        ),
       setLink: (start: number, end: number, text: string, url: string) =>
         setLink(editor, start, end, text, url),
       removeLink: (start: number, end: number) =>

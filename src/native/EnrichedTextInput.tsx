@@ -236,6 +236,12 @@ export const EnrichedTextInput = ({
     toggleCheckboxList: (checked: boolean) => {
       Commands.toggleCheckboxList(nullthrows(nativeRef.current), checked);
     },
+    increaseListLevel: () => {
+      Commands.increaseListLevel(nullthrows(nativeRef.current));
+    },
+    decreaseListLevel: () => {
+      Commands.decreaseListLevel(nullthrows(nativeRef.current));
+    },
     setLink: (start: number, end: number, text: string, url: string) => {
       Commands.addLink(nullthrows(nativeRef.current), start, end, text, url);
     },

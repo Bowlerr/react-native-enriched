@@ -13,13 +13,13 @@ export const EnrichedCheckboxItem = TaskItem.extend({
 
   addOptions() {
     return {
-      nested: false,
+      nested: true,
       HTMLAttributes: {},
       taskListTypeName: 'checkboxList',
     };
   },
 
-  content: 'paragraph',
+  content: 'paragraph block*',
 
   addKeyboardShortcuts() {
     return {

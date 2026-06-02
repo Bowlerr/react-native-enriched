@@ -6,6 +6,7 @@ import android.text.SpannableStringBuilder
 import android.util.Log
 import com.swmansion.enriched.common.EnrichedConstants
 import com.swmansion.enriched.textinput.EnrichedTextInputView
+import com.swmansion.enriched.textinput.spans.EnrichedInputBlockQuoteSpan
 import com.swmansion.enriched.textinput.spans.EnrichedSpans
 import com.swmansion.enriched.textinput.spans.interfaces.EnrichedInputSpan
 import com.swmansion.enriched.textinput.utils.getParagraphBounds
@@ -418,6 +419,126 @@ class ParagraphStyles(
 
     setAndMergeSpans(spannable, type, start, currentEnd)
     view.selection.validateStyles()
+  }
+
+  private fun getSelectedParagraphRanges(spannable: SpannableStringBuilder): List<Pair<Int, Int>> {
+    val selection = view.selection ?: return emptyList()
+    val (selectionStart, selectionEnd) = selection.getParagraphSelection()
+    if (spannable.isEmpty()) return emptyList()
+
+    val ranges = mutableListOf<Pair<Int, Int>>()
+    var current = selectionStart.coerceAtLeast(0).coerceAtMost(spannable.length)
+    val finalEnd = selectionEnd.coerceAtLeast(current).coerceAtMost(spannable.length)
+
+    while (current <= finalEnd) {
+      val (paragraphStart, paragraphEnd) = spannable.getParagraphBounds(current)
+      ranges.add(Pair(paragraphStart, paragraphEnd))
+
+      if (paragraphEnd >= finalEnd || paragraphEnd >= spannable.length) {
+        break
+      }
+
+      current = paragraphEnd + 1
+    }
+
+    return ranges
+  }
+
+  private fun setBlockQuoteSpan(
+    spannable: SpannableStringBuilder,
+    start: Int,
+    end: Int,
+  ) {
+    val (safeStart, safeEnd) = spannable.getSafeSpanBoundaries(start, end)
+    spannable.setSpan(
+      EnrichedInputBlockQuoteSpan(view.htmlStyle),
+      safeStart,
+      safeEnd,
+      Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+    )
+  }
+
+  private fun ensureNonEmptyParagraph(
+    spannable: SpannableStringBuilder,
+    start: Int,
+    end: Int,
+  ): Pair<Int, Int> {
+    if (start != end) {
+      return Pair(start, end)
+    }
+
+    spannable.insert(start, EnrichedConstants.ZWS_STRING)
+    return Pair(start, end + 1)
+  }
+
+  private fun hasBlockQuoteInRange(
+    spannable: SpannableStringBuilder,
+    start: Int,
+    end: Int,
+  ): Boolean = spannable.getSpans(start, end, EnrichedInputBlockQuoteSpan::class.java).isNotEmpty()
+
+  private fun removeInnermostBlockQuoteLevel(
+    spannable: SpannableStringBuilder,
+    start: Int,
+    end: Int,
+  ): Boolean {
+    val spans = spannable.getSpans(start, end, EnrichedInputBlockQuoteSpan::class.java)
+    if (spans.isEmpty()) return false
+
+    val span =
+      spans.maxWithOrNull(
+        compareBy<EnrichedInputBlockQuoteSpan> { spannable.getSpanStart(it) }
+          .thenBy { spannable.getSpanEnd(it) - spannable.getSpanStart(it) },
+      ) ?: return false
+
+    val spanStart = spannable.getSpanStart(span)
+    val spanEnd = spannable.getSpanEnd(span)
+    spannable.removeSpan(span)
+
+    if (spanStart < start) {
+      setBlockQuoteSpan(spannable, spanStart, start)
+    }
+
+    if (spanEnd > end) {
+      setBlockQuoteSpan(spannable, end, spanEnd)
+    }
+
+    return true
+  }
+
+  fun increaseBlockQuoteLevel(): Boolean {
+    val spannable = view.text as? SpannableStringBuilder ?: return false
+    val ranges = getSelectedParagraphRanges(spannable)
+    if (ranges.isEmpty()) return false
+    if (ranges.none { (start, end) -> hasBlockQuoteInRange(spannable, start, end) }) return false
+
+    for ((paragraphStart, paragraphEnd) in ranges) {
+      if (!hasBlockQuoteInRange(spannable, paragraphStart, paragraphEnd)) continue
+
+      val (start, end) = ensureNonEmptyParagraph(spannable, paragraphStart, paragraphEnd)
+      setBlockQuoteSpan(spannable, start, end)
+    }
+
+    view.selection?.validateStyles()
+    view.layoutManager.invalidateLayout()
+    return true
+  }
+
+  fun decreaseBlockQuoteLevel(): Boolean {
+    val spannable = view.text as? SpannableStringBuilder ?: return false
+    val ranges = getSelectedParagraphRanges(spannable)
+    if (ranges.isEmpty()) return false
+
+    var changed = false
+    for ((paragraphStart, paragraphEnd) in ranges) {
+      changed = removeInnermostBlockQuoteLevel(spannable, paragraphStart, paragraphEnd) || changed
+    }
+
+    if (!changed) return false
+
+    view.selection?.validateStyles()
+    view.layoutManager.invalidateLayout()
+    return true
   }
 
   fun getStyleRange(): Pair<Int, Int> = view.selection?.getParagraphSelection() ?: Pair(0, 0)

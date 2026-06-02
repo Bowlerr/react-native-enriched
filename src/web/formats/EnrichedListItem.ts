@@ -5,8 +5,6 @@ import { listBackspace, listEnter } from './listKeyboard';
 const LIST_WRAPPERS = ['unorderedList', 'orderedList'] as const;
 
 export const EnrichedListItem = ListItem.extend({
-  content: 'paragraph',
-
   addKeyboardShortcuts() {
     return {
       Enter: ({ editor }) => listEnter(editor, 'listItem'),

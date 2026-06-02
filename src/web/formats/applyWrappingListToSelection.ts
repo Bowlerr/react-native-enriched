@@ -9,9 +9,8 @@ import { nativePosToTiptapPos, tiptapPosToNativePos } from '../positionMapping';
  * Clears block styling with `clearNodes`, then wraps the selection’s blocks in a flat
  * `listTypeName` (one `itemTypeName` per block).
  *
- * We don't use toggleList because we've changed ListItem's content to
- * 'paragraph', in order not to allow nested lists. This however caused the
- * default toggle implementation to fail.
+ * We don't use toggleList because this command needs to keep native and web
+ * selection coordinates aligned while wrapping multiple selected blocks.
  *
  * SELECTION PRESERVATION: Modifying node boundaries here (destroying and
  * recreating blocks) causes ProseMirror's built-in selection to be invalid. To

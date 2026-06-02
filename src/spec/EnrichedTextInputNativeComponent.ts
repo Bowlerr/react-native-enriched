@@ -439,6 +439,8 @@ interface NativeCommands {
     viewRef: React.ElementRef<ComponentType>,
     checked: boolean
   ) => void;
+  increaseListLevel: (viewRef: React.ElementRef<ComponentType>) => void;
+  decreaseListLevel: (viewRef: React.ElementRef<ComponentType>) => void;
   addLink: (
     viewRef: React.ElementRef<ComponentType>,
     start: Int32,
@@ -502,6 +504,8 @@ export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
     'toggleOrderedList',
     'toggleUnorderedList',
     'toggleCheckboxList',
+    'increaseListLevel',
+    'decreaseListLevel',
     'addLink',
     'removeLink',
     'addImage',

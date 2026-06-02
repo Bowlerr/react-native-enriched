@@ -28,7 +28,7 @@ export function listEnter(editor: Editor, itemName: string): boolean {
     return false;
   }
 
-  // Flat lists only: list item is always the parent block of the paragraph (depth − 1).
+  // The list item is the direct parent block of the paragraph (depth - 1).
   const itemDepth = $from.depth - 1;
   if (itemDepth < 1) {
     return false;
