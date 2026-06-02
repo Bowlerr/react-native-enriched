@@ -37,7 +37,10 @@ import com.swmansion.enriched.common.spans.interfaces.EnrichedZeroWidthSpaceSpan
 import java.io.IOException;
 import java.io.StringReader;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.ccil.cowan.tagsoup.HTMLSchema;
 import org.ccil.cowan.tagsoup.Parser;
@@ -115,32 +118,100 @@ public class EnrichedParser {
   }
 
   private static void withinDiv(StringBuilder out, Spanned text, int start, int end) {
+    ArrayList<BlockFrame> openBlocks = new ArrayList<>();
     int next;
     for (int i = start; i < end; i = next) {
       next = text.nextSpanTransition(i, end, EnrichedBlockSpan.class);
-      EnrichedBlockSpan[] blocks = text.getSpans(i, next, EnrichedBlockSpan.class);
-      String tag = "unknown";
-      if (blocks.length > 0) {
-        tag = blocks[0] instanceof EnrichedCodeBlockSpan ? "codeblock" : "blockquote";
+      ArrayList<BlockFrame> activeBlocks = getActiveBlockFrames(text, i, next);
+      int commonBlockCount = commonBlockPrefixLength(openBlocks, activeBlocks);
+
+      for (int index = openBlocks.size() - 1; index >= commonBlockCount; index--) {
+        out.append("</").append(openBlocks.get(index).tag).append(">\n");
       }
 
-      // Each block appends a newline by default.
-      // If we set up a new block, we have to remove the last  character.
-      if (out.length() >= 5 && out.substring(out.length() - 5).equals("<br>\n")) {
-        out.replace(out.length() - 5, out.length(), "");
+      if (commonBlockCount < activeBlocks.size()) {
+        trimTrailingBreak(out);
       }
 
-      for (EnrichedBlockSpan ignored : blocks) {
-        out.append("<").append(tag).append(getAlignmentStyle(text, i, next)).append(">\n");
+      for (int index = commonBlockCount; index < activeBlocks.size(); index++) {
+        out.append("<")
+            .append(activeBlocks.get(index).tag)
+            .append(getAlignmentStyle(text, i, next))
+            .append(">\n");
       }
+
       withinBlock(out, text, i, next);
-      for (EnrichedBlockSpan ignored : blocks) {
-        out.append("</").append(tag).append(">\n");
-      }
+      openBlocks = activeBlocks;
+    }
+
+    for (int index = openBlocks.size() - 1; index >= 0; index--) {
+      out.append("</").append(openBlocks.get(index).tag).append(">\n");
     }
   }
 
-  private static String getBlockTag(EnrichedParagraphSpan[] spans) {
+  private static ArrayList<BlockFrame> getActiveBlockFrames(Spanned text, int start, int end) {
+    EnrichedBlockSpan[] blocks = text.getSpans(start, end, EnrichedBlockSpan.class);
+    ArrayList<BlockFrame> frames = new ArrayList<>();
+    for (EnrichedBlockSpan block : blocks) {
+      String tag = getBlockTag(block);
+      if (tag == null) {
+        continue;
+      }
+      frames.add(new BlockFrame(block, tag, text.getSpanStart(block), text.getSpanEnd(block)));
+    }
+
+    Collections.sort(
+        frames,
+        (left, right) -> {
+          if (left.start != right.start) {
+            return left.start - right.start;
+          }
+          if (left.end != right.end) {
+            return right.end - left.end;
+          }
+          return blockTagPriority(left.tag) - blockTagPriority(right.tag);
+        });
+    return frames;
+  }
+
+  private static int blockTagPriority(String tag) {
+    if ("blockquote".equals(tag)) {
+      return 0;
+    }
+    if ("codeblock".equals(tag)) {
+      return 1;
+    }
+    return 2;
+  }
+
+  private static String getBlockTag(EnrichedBlockSpan span) {
+    if (span instanceof EnrichedBlockQuoteSpan) {
+      return "blockquote";
+    }
+    if (span instanceof EnrichedCodeBlockSpan) {
+      return "codeblock";
+    }
+    return null;
+  }
+
+  private static int commonBlockPrefixLength(
+      List<BlockFrame> openBlocks, List<BlockFrame> activeBlocks) {
+    int commonCount = Math.min(openBlocks.size(), activeBlocks.size());
+    for (int index = 0; index < commonCount; index++) {
+      if (!openBlocks.get(index).matches(activeBlocks.get(index))) {
+        return index;
+      }
+    }
+    return commonCount;
+  }
+
+  private static void trimTrailingBreak(StringBuilder out) {
+    if (out.length() >= 5 && out.substring(out.length() - 5).equals("<br>\n")) {
+      out.replace(out.length() - 5, out.length(), "");
+    }
+  }
+
+  private static EnrichedListSpan getDeepestListSpan(EnrichedParagraphSpan[] spans) {
     EnrichedListSpan deepestList = null;
 
     for (EnrichedParagraphSpan span : spans) {
@@ -151,6 +222,12 @@ public class EnrichedParser {
         }
       }
     }
+
+    return deepestList;
+  }
+
+  private static String getBlockTag(EnrichedParagraphSpan[] spans) {
+    EnrichedListSpan deepestList = getDeepestListSpan(spans);
 
     if (deepestList instanceof EnrichedUnorderedListSpan) {
       return "ul";
@@ -200,100 +277,220 @@ public class EnrichedParser {
   }
 
   private static void withinBlock(StringBuilder out, Spanned text, int start, int end) {
-    boolean isInUlList = false;
-    boolean isInOlList = false;
-    boolean isInCheckboxList = false;
+    ArrayList<ListFrame> openLists = new ArrayList<>();
+    ArrayList<ParagraphFrame> paragraphs = getParagraphFrames(text, start, end);
 
+    for (int index = 0; index < paragraphs.size(); index++) {
+      ParagraphFrame paragraph = paragraphs.get(index);
+      if (paragraph.empty) {
+        closeListFrames(out, openLists, 0);
+        out.append("<br>\n");
+        continue;
+      }
+
+      if (!paragraph.isListItem()) {
+        closeListFrames(out, openLists, 0);
+        writeParagraph(out, text, paragraph);
+        continue;
+      }
+
+      updateListFrames(out, openLists, paragraph);
+      writeListItem(out, text, paragraph, openLists.get(openLists.size() - 1));
+
+      ParagraphFrame nextParagraph = nextVisibleParagraph(paragraphs, index + 1);
+      boolean keepItemOpen =
+          nextParagraph != null
+              && nextParagraph.isListItem()
+              && nextParagraph.listLevel() > paragraph.listLevel();
+      if (!keepItemOpen) {
+        ListFrame currentList = openLists.get(openLists.size() - 1);
+        out.append("</li>\n");
+        currentList.itemOpen = false;
+      }
+    }
+
+    closeListFrames(out, openLists, 0);
+  }
+
+  private static ArrayList<ParagraphFrame> getParagraphFrames(Spanned text, int start, int end) {
+    ArrayList<ParagraphFrame> paragraphs = new ArrayList<>();
     int next;
-    for (int i = start; i <= end; i = next) {
+    for (int i = start; i <= end; i = next + 1) {
       next = TextUtils.indexOf(text, '\n', i, end);
       if (next < 0) {
         next = end;
       }
       if (next == i) {
-        if (isInUlList) {
-          // Current paragraph is no longer a list item; close the previously opened list
-          isInUlList = false;
-          out.append("</ul>\n");
-        } else if (isInOlList) {
-          // Current paragraph is no longer a list item; close the previously opened list
-          isInOlList = false;
-          out.append("</ol>\n");
-        } else if (isInCheckboxList) {
-          // Current paragraph is no longer a list item; close the previously opened list
-          isInCheckboxList = false;
-          out.append("</ul>\n");
-        }
-        out.append("<br>\n");
+        paragraphs.add(ParagraphFrame.empty(i, next));
       } else {
         EnrichedParagraphSpan[] paragraphStyles =
             text.getSpans(i, next, EnrichedParagraphSpan.class);
-        String tag = getBlockTag(paragraphStyles);
-        boolean isUlListItem = tag.equals("ul");
-        boolean isOlListItem = tag.equals("ol");
-        boolean isCheckboxListItem = tag.equals("ul data-type=\"checkbox\"");
-
-        if (isInUlList && !isUlListItem) {
-          // Current paragraph is no longer a list item; close the previously opened list
-          isInUlList = false;
-          out.append("</ul>\n");
-        } else if (isInOlList && !isOlListItem) {
-          // Current paragraph is no longer a list item; close the previously opened list
-          isInOlList = false;
-          out.append("</ol>\n");
-        } else if (isInCheckboxList && !isCheckboxListItem) {
-          // Current paragraph is no longer a list item; close the previously opened list
-          isInCheckboxList = false;
-          out.append("</ul>\n");
-        }
-
-        if (isUlListItem && !isInUlList) {
-          // Current paragraph is the first item in a list
-          isInUlList = true;
-          out.append("<ul").append(">\n");
-        } else if (isOlListItem && !isInOlList) {
-          // Current paragraph is the first item in a list
-          isInOlList = true;
-          out.append("<ol").append(">\n");
-        } else if (isCheckboxListItem && !isInCheckboxList) {
-          // Current paragraph is the first item in a list
-          isInCheckboxList = true;
-          out.append("<ul data-type=\"checkbox\">\n");
-        }
-
-        boolean isList = isUlListItem || isOlListItem || isCheckboxListItem;
-        String tagType = isList ? "li" : tag;
-
-        out.append("<");
-        out.append(tagType);
-
-        if (isCheckboxListItem) {
-          EnrichedCheckboxListSpan[] checkboxSpans =
-              text.getSpans(i, next, EnrichedCheckboxListSpan.class);
-          if (checkboxSpans.length > 0) {
-            boolean isChecked = checkboxSpans[0].isChecked();
-            if (isChecked) out.append(" checked");
-          }
-        }
-
-        out.append(getAlignmentStyle(text, i, next));
-        out.append(">");
-        withinParagraph(out, text, i, next);
-        out.append("</");
-        out.append(tagType);
-        out.append(">\n");
-        if (next == end && isInUlList) {
-          isInUlList = false;
-          out.append("</ul>\n");
-        } else if (next == end && isInOlList) {
-          isInOlList = false;
-          out.append("</ol>\n");
-        } else if (next == end && isInCheckboxList) {
-          isInCheckboxList = false;
-          out.append("</ul>\n");
-        }
+        EnrichedListSpan listSpan = getDeepestListSpan(paragraphStyles);
+        paragraphs.add(new ParagraphFrame(i, next, getBlockTag(paragraphStyles), listSpan));
       }
-      next++;
+      if (next == end) {
+        break;
+      }
+    }
+    return paragraphs;
+  }
+
+  private static ParagraphFrame nextVisibleParagraph(
+      ArrayList<ParagraphFrame> paragraphs, int startIndex) {
+    for (int index = startIndex; index < paragraphs.size(); index++) {
+      ParagraphFrame paragraph = paragraphs.get(index);
+      if (!paragraph.empty) {
+        return paragraph;
+      }
+    }
+    return null;
+  }
+
+  private static void updateListFrames(
+      StringBuilder out, ArrayList<ListFrame> openLists, ParagraphFrame paragraph) {
+    int targetDepth = paragraph.listLevel() + 1;
+    closeListFrames(out, openLists, targetDepth);
+
+    if (openLists.size() == targetDepth) {
+      ListFrame currentList = openLists.get(targetDepth - 1);
+      if (!currentList.matches(paragraph)) {
+        closeListFrames(out, openLists, targetDepth - 1);
+      } else if (currentList.itemOpen) {
+        out.append("</li>\n");
+        currentList.itemOpen = false;
+      }
+    }
+
+    while (openLists.size() < targetDepth) {
+      ListFrame newList = ListFrame.fromParagraph(paragraph, openLists.size());
+      out.append("<").append(newList.openTag()).append(">\n");
+      openLists.add(newList);
+    }
+  }
+
+  private static void closeListFrames(
+      StringBuilder out, ArrayList<ListFrame> openLists, int targetDepth) {
+    while (openLists.size() > targetDepth) {
+      ListFrame currentList = openLists.remove(openLists.size() - 1);
+      if (currentList.itemOpen) {
+        out.append("</li>\n");
+      }
+      out.append("</").append(currentList.closeTag()).append(">\n");
+    }
+  }
+
+  private static void writeParagraph(StringBuilder out, Spanned text, ParagraphFrame paragraph) {
+    out.append("<")
+        .append(paragraph.tag)
+        .append(getAlignmentStyle(text, paragraph.start, paragraph.end))
+        .append(">");
+    withinParagraph(out, text, paragraph.start, paragraph.end);
+    out.append("</").append(paragraph.tag).append(">\n");
+  }
+
+  private static void writeListItem(
+      StringBuilder out, Spanned text, ParagraphFrame paragraph, ListFrame currentList) {
+    out.append("<li");
+    if (currentList.checkbox && ((EnrichedCheckboxListSpan) paragraph.listSpan).isChecked()) {
+      out.append(" checked");
+    }
+    out.append(getAlignmentStyle(text, paragraph.start, paragraph.end));
+    out.append(">");
+    withinParagraph(out, text, paragraph.start, paragraph.end);
+    currentList.itemOpen = true;
+  }
+
+  private static class BlockFrame {
+    final EnrichedBlockSpan span;
+    final String tag;
+    final int start;
+    final int end;
+
+    BlockFrame(EnrichedBlockSpan span, String tag, int start, int end) {
+      this.span = span;
+      this.tag = tag;
+      this.start = start;
+      this.end = end;
+    }
+
+    boolean matches(BlockFrame other) {
+      return span == other.span && tag.equals(other.tag);
+    }
+  }
+
+  private static class ParagraphFrame {
+    final int start;
+    final int end;
+    final String tag;
+    final EnrichedListSpan listSpan;
+    final boolean empty;
+
+    ParagraphFrame(int start, int end, String tag, EnrichedListSpan listSpan) {
+      this.start = start;
+      this.end = end;
+      this.tag = tag;
+      this.listSpan = listSpan;
+      this.empty = false;
+    }
+
+    static ParagraphFrame empty(int start, int end) {
+      return new ParagraphFrame(start, end, "br", null, true);
+    }
+
+    private ParagraphFrame(
+        int start, int end, String tag, EnrichedListSpan listSpan, boolean empty) {
+      this.start = start;
+      this.end = end;
+      this.tag = tag;
+      this.listSpan = listSpan;
+      this.empty = empty;
+    }
+
+    boolean isListItem() {
+      return listSpan != null;
+    }
+
+    int listLevel() {
+      return listSpan == null ? 0 : Math.max(0, listSpan.getLevel());
+    }
+  }
+
+  private static class ListFrame {
+    final String tag;
+    final boolean checkbox;
+    final int level;
+    boolean itemOpen = false;
+
+    private ListFrame(String tag, boolean checkbox, int level) {
+      this.tag = tag;
+      this.checkbox = checkbox;
+      this.level = level;
+    }
+
+    static ListFrame fromParagraph(ParagraphFrame paragraph, int level) {
+      if (paragraph.listSpan instanceof EnrichedOrderedListSpan) {
+        return new ListFrame("ol", false, level);
+      }
+      if (paragraph.listSpan instanceof EnrichedCheckboxListSpan) {
+        return new ListFrame("ul", true, level);
+      }
+      return new ListFrame("ul", false, level);
+    }
+
+    boolean matches(ParagraphFrame paragraph) {
+      ListFrame other = fromParagraph(paragraph, paragraph.listLevel());
+      return level == other.level && checkbox == other.checkbox && tag.equals(other.tag);
+    }
+
+    String openTag() {
+      if (checkbox) {
+        return "ul data-type=\"checkbox\"";
+      }
+      return tag;
+    }
+
+    String closeTag() {
+      return tag;
     }
   }
 
@@ -611,8 +808,7 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       startBlockElement(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("ul")) {
       String dataType = attributes.getValue("", "data-type");
-      mListStack.addLast(
-          new ListContext("checkbox".equalsIgnoreCase(dataType) ? "checked" : "unordered"));
+      mListStack.addLast(new ListContext(isCheckboxListType(dataType) ? "checked" : "unordered"));
       startBlockElement(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("ol")) {
       mListStack.addLast(new ListContext("ordered"));
@@ -791,6 +987,19 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
         || value.equalsIgnoreCase("checked");
   }
 
+  private static boolean isCheckboxListType(String value) {
+    return value != null
+        && (value.equalsIgnoreCase("checkbox") || value.equalsIgnoreCase("checkboxList"));
+  }
+
+  private static String checkboxStateAttribute(Attributes attributes) {
+    String checked = attributes.getValue("", "checked");
+    if (checked != null) {
+      return checked;
+    }
+    return attributes.getValue("", "data-checked");
+  }
+
   private static void endBlockElement(Editable text) {
     Newline n = getLast(text, Newline.class);
     if (n != null) {
@@ -816,7 +1025,7 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       context.mIndex++;
       start(text, new List("ordered", context.mIndex, false, level));
     } else if (context != null && context.mType.equals("checked")) {
-      String isChecked = attributes.getValue("", "checked");
+      String isChecked = checkboxStateAttribute(attributes);
       start(text, new List("checked", 0, isTruthyAttribute(isChecked), level));
     } else {
       start(text, new List("unordered", 0, false, level));

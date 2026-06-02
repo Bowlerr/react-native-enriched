@@ -730,7 +730,7 @@ Line 3</code></pre>
 <p>
   Mixed mention sentence with
   <mention text="@Grace Hopper" indicator="@" id="user-grace" type="user">
-    @Grace Hopper 
+    @Grace Hopper
   </mention>
   and
   <mention text="#handover" indicator="#" id="channel-handover" type="channel">
