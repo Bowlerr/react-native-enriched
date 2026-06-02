@@ -28,6 +28,47 @@ static BOOL EnrichedCodeBlockParagraphHasVisibleContent(NSString *text,
   return trimmed.length > 0;
 }
 
+static BOOL EnrichedCodeBlockListMarkerMatches(NSString *markerFormat,
+                                               NSString *baseValue) {
+  return markerFormat != nullptr &&
+         ([markerFormat isEqualToString:baseValue] ||
+          [markerFormat hasPrefix:[baseValue stringByAppendingString:@":"]]);
+}
+
+static NSInteger EnrichedCodeBlockListLevel(NSString *markerFormat,
+                                            NSString *baseValue) {
+  if (!EnrichedCodeBlockListMarkerMatches(markerFormat, baseValue)) {
+    return -1;
+  }
+
+  NSRange separator = [markerFormat rangeOfString:@":"];
+  if (separator.location == NSNotFound) {
+    return 0;
+  }
+
+  NSString *levelString =
+      [markerFormat substringFromIndex:separator.location + separator.length];
+  return MAX(0, [levelString integerValue]);
+}
+
+static CGFloat EnrichedCodeBlockBlockQuoteIndent(id<EnrichedViewHost> host,
+                                                 NSParagraphStyle *pStyle) {
+  NSInteger blockquoteLevel = -1;
+  for (NSTextList *textList in pStyle.textLists) {
+    blockquoteLevel =
+        MAX(blockquoteLevel, EnrichedCodeBlockListLevel(textList.markerFormat,
+                                                        @"EnrichedBlockQuote"));
+  }
+
+  if (blockquoteLevel < 0) {
+    return 0.0;
+  }
+
+  return ([host.config blockquoteBorderWidth] +
+          [host.config blockquoteGapWidth]) *
+         (blockquoteLevel + 1);
+}
+
 @implementation CodeBlockStyle
 
 + (StyleType)getType {
@@ -89,10 +130,13 @@ static BOOL EnrichedCodeBlockParagraphHasVisibleContent(NSString *text,
     NSMutableParagraphStyle *pStyle =
         existingStyle != nullptr ? [existingStyle mutableCopy]
                                  : [[NSMutableParagraphStyle alloc] init];
+    CGFloat requiredHeadIndent =
+        EnrichedCodeBlockBlockQuoteIndent(self.host, pStyle) +
+        horizontalPadding;
 
-    pStyle.headIndent = MAX(pStyle.headIndent, horizontalPadding);
+    pStyle.headIndent = MAX(pStyle.headIndent, requiredHeadIndent);
     pStyle.firstLineHeadIndent =
-        MAX(pStyle.firstLineHeadIndent, horizontalPadding);
+        MAX(pStyle.firstLineHeadIndent, requiredHeadIndent);
     if (pStyle.tailIndent == 0.0) {
       pStyle.tailIndent = -horizontalPadding;
     } else if (pStyle.tailIndent < 0.0) {

@@ -531,8 +531,8 @@ static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
   NSRange visibleCharRange = [self characterRangeForGlyphRange:glyphRange
                                               actualGlyphRange:NULL];
 
-  [self drawBlockQuotes:host origin:origin visibleCharRange:visibleCharRange];
   [self drawCodeBlocks:host origin:origin visibleCharRange:visibleCharRange];
+  [self drawBlockQuotes:host origin:origin visibleCharRange:visibleCharRange];
   [self drawInlineCodes:host origin:origin visibleCharRange:visibleCharRange];
   [self drawMentions:host origin:origin visibleCharRange:visibleCharRange];
   [self drawLists:host origin:origin visibleCharRange:visibleCharRange];

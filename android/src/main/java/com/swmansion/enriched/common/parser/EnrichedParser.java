@@ -9,6 +9,7 @@ import android.text.TextUtils;
 import android.text.style.AlignmentSpan;
 import android.text.style.ParagraphStyle;
 import com.swmansion.enriched.common.EnrichedConstants;
+import com.swmansion.enriched.common.spans.EnrichedBlockQuoteSpan;
 import com.swmansion.enriched.common.spans.EnrichedBoldSpan;
 import com.swmansion.enriched.common.spans.EnrichedCheckboxListSpan;
 import com.swmansion.enriched.common.spans.EnrichedCodeBlockSpan;
@@ -473,7 +474,7 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
             obj[i] instanceof EnrichedBlockSpan || obj[i] instanceof AlignmentSpan
                 ? Spannable.SPAN_INCLUSIVE_EXCLUSIVE
                 : Spannable.SPAN_EXCLUSIVE_EXCLUSIVE;
-        mSpannableStringBuilder.setSpan(obj[i], start, end, flags);
+        mSpannableStringBuilder.setSpan(obj[i], start, end, getSpanFlags(obj[i], flags));
       }
     }
 
@@ -956,9 +957,17 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
 
     if (where != len) {
       for (Object span : spans) {
-        text.setSpan(span, where, len, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(span, where, len, getSpanFlags(span, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE));
       }
     }
+  }
+
+  private static int getSpanFlags(Object span, int baseFlags) {
+    if (span instanceof EnrichedBlockQuoteSpan) {
+      return baseFlags | (1 << Spanned.SPAN_PRIORITY_SHIFT);
+    }
+
+    return baseFlags;
   }
 
   private static void start(Editable text, Object mark) {
