@@ -91,7 +91,7 @@ open class EnrichedBlockQuoteSpan(
       }
 
       is EnrichedUnorderedListSpan -> {
-        enrichedStyle.ulMarginLeft * level + enrichedStyle.ulGapWidth
+        enrichedStyle.ulMarginLeft * level + enrichedStyle.ulGapWidth + enrichedStyle.ulBulletSize
       }
 
       else -> {
