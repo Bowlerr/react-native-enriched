@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import android.text.Spanned
 import android.text.TextPaint
 import android.text.style.LineBackgroundSpan
+import android.text.style.LineHeightSpan
 import android.text.style.MetricAffectingSpan
 import com.swmansion.enriched.common.EnrichedStyle
 import com.swmansion.enriched.common.spans.interfaces.EnrichedBlockSpan
@@ -16,6 +17,7 @@ import com.swmansion.enriched.common.spans.interfaces.EnrichedListSpan
 open class EnrichedCodeBlockSpan(
   private val enrichedStyle: EnrichedStyle,
 ) : MetricAffectingSpan(),
+  LineHeightSpan,
   LineBackgroundSpan,
   EnrichedBlockSpan {
   override fun updateDrawState(paint: TextPaint) {
@@ -25,6 +27,35 @@ open class EnrichedCodeBlockSpan(
 
   override fun updateMeasureState(paint: TextPaint) {
     paint.typeface = Typeface.MONOSPACE
+  }
+
+  override fun chooseHeight(
+    text: CharSequence,
+    start: Int,
+    end: Int,
+    spanstartv: Int,
+    v: Int,
+    fm: Paint.FontMetricsInt,
+  ) {
+    if (text !is Spanned) {
+      return
+    }
+
+    val spanStart = text.getSpanStart(this)
+    val spanEnd = text.getSpanEnd(this)
+    if (spanStart < 0 || spanEnd < 0) {
+      return
+    }
+
+    if (isFirstLineOfSpan(start, spanStart)) {
+      fm.ascent -= CODE_BLOCK_VERTICAL_MARGIN
+      fm.top -= CODE_BLOCK_VERTICAL_MARGIN
+    }
+
+    if (isLastLineOfSpan(text, end, spanEnd)) {
+      fm.descent += CODE_BLOCK_VERTICAL_MARGIN
+      fm.bottom += CODE_BLOCK_VERTICAL_MARGIN
+    }
   }
 
   override fun drawBackground(
@@ -51,8 +82,8 @@ open class EnrichedCodeBlockSpan(
 
     val spanStart = text.getSpanStart(this)
     val spanEnd = text.getSpanEnd(this)
-    val isFirstLineOfSpan = start == spanStart
-    val isLastLineOfSpan = end == spanEnd || (spanEnd + 1 == end && text[spanEnd] == '\n')
+    val isFirstLineOfSpan = isFirstLineOfSpan(start, spanStart)
+    val isLastLineOfSpan = isLastLineOfSpan(text, end, spanEnd)
 
     val path = Path()
     val radii = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
@@ -74,7 +105,26 @@ open class EnrichedCodeBlockSpan(
     }
 
     val backgroundLeft = codeBlockBackgroundLeft(text, start, end, left, right)
-    val rect = RectF(backgroundLeft, top.toFloat(), right.toFloat(), bottom.toFloat())
+    val backgroundTop =
+      if (isFirstLineOfSpan) {
+        top + CODE_BLOCK_VERTICAL_MARGIN
+      } else {
+        top
+      }
+    val backgroundBottom =
+      if (isLastLineOfSpan) {
+        bottom - CODE_BLOCK_VERTICAL_MARGIN
+      } else {
+        bottom
+      }
+
+    if (backgroundBottom <= backgroundTop) {
+      p.color = previousColor
+      return
+    }
+
+    val rect =
+      RectF(backgroundLeft, backgroundTop.toFloat(), right.toFloat(), backgroundBottom.toFloat())
 
     path.addRoundRect(rect, radii, Path.Direction.CW)
     canvas.drawPath(path, p)
@@ -88,14 +138,31 @@ open class EnrichedCodeBlockSpan(
     left: Int,
     right: Int,
   ): Float {
-    val listInset = parentListContentIndent(text, start, end)
-    if (listInset <= 0) {
+    val blockInset =
+      parentBlockQuoteContentIndent(text, start, end) + parentListContentIndent(text, start, end)
+    if (blockInset <= 0) {
       return left.toFloat()
     }
 
-    val insetLeft = left + listInset - CODE_BLOCK_HORIZONTAL_PADDING
+    val insetLeft = left + blockInset - CODE_BLOCK_HORIZONTAL_PADDING
     val maxLeft = (right - 1).coerceAtLeast(left)
     return insetLeft.coerceIn(left, maxLeft).toFloat()
+  }
+
+  private fun parentBlockQuoteContentIndent(
+    text: Spanned,
+    start: Int,
+    end: Int,
+  ): Int {
+    val codeBlockStart = text.getSpanStart(this)
+    if (codeBlockStart < 0) {
+      return 0
+    }
+
+    return text
+      .getSpans(start, end, EnrichedBlockQuoteSpan::class.java)
+      .filter { blockQuoteSpan -> text.getSpanStart(blockQuoteSpan) in 0..codeBlockStart }
+      .sumOf { enrichedStyle.blockquoteStripeWidth + enrichedStyle.blockquoteGapWidth }
   }
 
   private fun parentListContentIndent(
@@ -137,7 +204,19 @@ open class EnrichedCodeBlockSpan(
     }
   }
 
+  private fun isFirstLineOfSpan(
+    start: Int,
+    spanStart: Int,
+  ): Boolean = start == spanStart
+
+  private fun isLastLineOfSpan(
+    text: CharSequence,
+    end: Int,
+    spanEnd: Int,
+  ): Boolean = end == spanEnd || (spanEnd < text.length && spanEnd + 1 == end && text[spanEnd] == '\n')
+
   companion object {
     private const val CODE_BLOCK_HORIZONTAL_PADDING = 12
+    private const val CODE_BLOCK_VERTICAL_MARGIN = 6
   }
 }

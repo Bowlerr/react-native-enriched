@@ -281,6 +281,15 @@ static BOOL EnrichedParagraphHasBlockQuote(NSParagraphStyle *pStyle) {
   return NO;
 }
 
+static BOOL EnrichedParagraphHasCodeBlock(NSParagraphStyle *pStyle) {
+  for (NSTextList *textList in pStyle.textLists) {
+    if ([textList.markerFormat isEqualToString:@"EnrichedCodeBlock"]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 static CGFloat EnrichedBlockQuoteIndentForParagraph(id<EnrichedViewHost> host,
                                                     NSParagraphStyle *pStyle) {
   if (pStyle == nil) {
@@ -672,7 +681,7 @@ static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
 
   NSArray<StylePair *> *allCodeBlocks = [codeBlockStyle all:visibleCharRange];
   NSArray<StylePair *> *mergedCodeBlocks =
-      [self mergeContiguousStylePairs:allCodeBlocks];
+      [self mergeContiguousCodeBlockStylePairs:allCodeBlocks];
   UIColor *bgColor =
       [[host.config codeBlockBgColor] colorWithAlphaIfNotTransparent:1.0];
   UIColor *borderColor =
@@ -762,6 +771,49 @@ static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
   }
 
   // Add the final block
+  StylePair *lastPair = [[StylePair alloc] init];
+  lastPair.rangeValue = [NSValue valueWithRange:currentRange];
+  lastPair.styleValue = currentPair.styleValue;
+  [mergedPairs addObject:lastPair];
+
+  return mergedPairs;
+}
+
+- (NSArray<StylePair *> *)mergeContiguousCodeBlockStylePairs:
+    (NSArray<StylePair *> *)pairs {
+  if (pairs.count == 0) {
+    return @[];
+  }
+
+  NSMutableArray<StylePair *> *mergedPairs = [[NSMutableArray alloc] init];
+  StylePair *currentPair = pairs[0];
+  StylePair *previousPair = pairs[0];
+  NSRange currentRange = [currentPair.rangeValue rangeValue];
+
+  for (NSUInteger i = 1; i < pairs.count; i++) {
+    StylePair *nextPair = pairs[i];
+    NSRange nextRange = [nextPair.rangeValue rangeValue];
+    NSParagraphStyle *previousStyle =
+        (NSParagraphStyle *)previousPair.styleValue;
+    NSParagraphStyle *nextStyle = (NSParagraphStyle *)nextPair.styleValue;
+    BOOL spacingBoundary = previousStyle.paragraphSpacing > 0.0 &&
+                           nextStyle.paragraphSpacingBefore > 0.0;
+
+    if (NSMaxRange(currentRange) == nextRange.location && !spacingBoundary) {
+      currentRange.length += nextRange.length;
+    } else {
+      StylePair *mergedPair = [[StylePair alloc] init];
+      mergedPair.rangeValue = [NSValue valueWithRange:currentRange];
+      mergedPair.styleValue = currentPair.styleValue;
+      [mergedPairs addObject:mergedPair];
+
+      currentPair = nextPair;
+      currentRange = nextRange;
+    }
+
+    previousPair = nextPair;
+  }
+
   StylePair *lastPair = [[StylePair alloc] init];
   lastPair.rangeValue = [NSValue valueWithRange:currentRange];
   lastPair.styleValue = currentPair.styleValue;
@@ -886,6 +938,7 @@ static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
       continue;
     }
     NSInteger currentQuoteLevel = EnrichedListMarkerLevel(quoteMarker);
+    BOOL paragraphHasCodeBlock = EnrichedParagraphHasCodeBlock(paragraphStyle);
 
     if (!EnrichedParagraphHasVisibleContent(text, paragraphRange)) {
       continue;
@@ -931,8 +984,18 @@ static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
                                          textRect.origin.x - adjustedX;
                                      textRect.origin.x = adjustedX;
                                    }
-                                   textRect.origin.y = rect.origin.y;
-                                   textRect.size.height = rect.size.height;
+                                   if (EnrichedParagraphHasCodeBlock(
+                                           lineParagraphStyle)) {
+                                     CGFloat verticalPadding = 6.0;
+                                     textRect.origin.y =
+                                         usedRect.origin.y - verticalPadding;
+                                     textRect.size.height =
+                                         usedRect.size.height +
+                                         verticalPadding * 2.0;
+                                   } else {
+                                     textRect.origin.y = rect.origin.y;
+                                     textRect.size.height = rect.size.height;
+                                   }
                                    paragraphRect =
                                        CGRectIsNull(paragraphRect)
                                            ? textRect
@@ -974,7 +1037,9 @@ static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
             @"rect" : [NSValue valueWithCGRect:paragraphRect],
             @"x" : @(railX),
             @"marker" : quoteMarker,
-            @"lastQuoteLevel" : @(currentQuoteLevel)
+            @"lastQuoteLevel" : @(currentQuoteLevel),
+            @"startsWithCodeBlock" : @(paragraphHasCodeBlock),
+            @"endsWithCodeBlock" : @(paragraphHasCodeBlock)
           } mutableCopy];
           activeRailSegments[railKey] = activeSegment;
           continue;
@@ -985,6 +1050,7 @@ static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
             [NSValue valueWithCGRect:CGRectUnion(activeRect, paragraphRect)];
         activeSegment[@"marker"] = quoteMarker;
         activeSegment[@"lastQuoteLevel"] = @(currentQuoteLevel);
+        activeSegment[@"endsWithCodeBlock"] = @(paragraphHasCodeBlock);
       }
     }
   }
@@ -995,8 +1061,11 @@ static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
   for (NSDictionary *quoteSegment in quoteRailSegments) {
     CGRect quoteRect = [quoteSegment[@"rect"] CGRectValue];
     CGFloat railX = [quoteSegment[@"x"] doubleValue];
-    drawQuoteRail(quoteRect, railX, desiredVerticalPadding,
-                  desiredVerticalPadding);
+    BOOL startsWithCodeBlock = [quoteSegment[@"startsWithCodeBlock"] boolValue];
+    BOOL endsWithCodeBlock = [quoteSegment[@"endsWithCodeBlock"] boolValue];
+    CGFloat topPadding = startsWithCodeBlock ? 0.0 : desiredVerticalPadding;
+    CGFloat bottomPadding = endsWithCodeBlock ? 0.0 : desiredVerticalPadding;
+    drawQuoteRail(quoteRect, railX, topPadding, bottomPadding);
   }
 }
 
