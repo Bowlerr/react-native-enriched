@@ -618,12 +618,13 @@ static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
     return;
   }
 
-  UIColor *bgColor =
-      [[host.config inlineCodeBgColor] colorWithAlphaIfNotTransparent:0.4];
-  CGFloat leadingPadding = 5.0;
+  CGFloat backgroundAlpha = 80.0 / 255.0;
+  UIColor *bgColor = [[host.config inlineCodeBgColor]
+      colorWithAlphaIfNotTransparent:backgroundAlpha];
+  CGFloat leadingPadding = 3.0;
   CGFloat trailingPadding = 3.0;
-  CGFloat verticalPadding = 1.0;
-  CGFloat radius = 4.0;
+  CGFloat verticalPadding = 3.0;
+  CGFloat radius = 2.0;
 
   for (StylePair *pair in [inlineCodeStyle all:visibleCharRange]) {
     [self drawTightInlineBackgroundForRange:[pair.rangeValue rangeValue]
