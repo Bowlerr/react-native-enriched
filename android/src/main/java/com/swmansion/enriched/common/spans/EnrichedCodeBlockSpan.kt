@@ -69,13 +69,13 @@ open class EnrichedCodeBlockSpan(
     }
 
     if (isFirstLineOfSpan(start, spanStart)) {
-      fm.ascent -= CODE_BLOCK_VERTICAL_MARGIN
-      fm.top -= CODE_BLOCK_VERTICAL_MARGIN
+      fm.ascent -= CODE_BLOCK_VERTICAL_MARGIN + CODE_BLOCK_VERTICAL_PADDING
+      fm.top -= CODE_BLOCK_VERTICAL_MARGIN + CODE_BLOCK_VERTICAL_PADDING
     }
 
     if (isLastLineOfSpan(text, end, spanEnd)) {
-      fm.descent += CODE_BLOCK_VERTICAL_MARGIN
-      fm.bottom += CODE_BLOCK_VERTICAL_MARGIN
+      fm.descent += CODE_BLOCK_VERTICAL_MARGIN + CODE_BLOCK_VERTICAL_PADDING
+      fm.bottom += CODE_BLOCK_VERTICAL_MARGIN + CODE_BLOCK_VERTICAL_PADDING
     }
   }
 
@@ -238,6 +238,7 @@ open class EnrichedCodeBlockSpan(
 
   companion object {
     private const val CODE_BLOCK_HORIZONTAL_PADDING = 12
-    private const val CODE_BLOCK_VERTICAL_MARGIN = 6
+    private const val CODE_BLOCK_VERTICAL_MARGIN = 3
+    private const val CODE_BLOCK_VERTICAL_PADDING = 6
   }
 }
