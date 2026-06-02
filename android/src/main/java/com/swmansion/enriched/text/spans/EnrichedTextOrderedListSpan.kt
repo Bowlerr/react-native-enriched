@@ -8,9 +8,10 @@ import com.swmansion.enriched.text.spans.interfaces.EnrichedTextSpan
 class EnrichedTextOrderedListSpan(
   index: Int,
   enrichedStyle: EnrichedStyle,
-) : EnrichedOrderedListSpan(index, enrichedStyle),
+  level: Int = 0,
+) : EnrichedOrderedListSpan(index, enrichedStyle, level),
   EnrichedTextSpan {
   override val dependsOnHtmlStyle = true
 
-  override fun rebuildWithStyle(style: EnrichedTextStyle) = EnrichedTextOrderedListSpan(index, style)
+  override fun rebuildWithStyle(style: EnrichedTextStyle) = EnrichedTextOrderedListSpan(index, style, level)
 }

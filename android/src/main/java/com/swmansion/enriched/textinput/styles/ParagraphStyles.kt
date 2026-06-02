@@ -1,8 +1,10 @@
 package com.swmansion.enriched.textinput.styles
 
 import android.text.Editable
+import android.text.Layout
 import android.text.Spannable
 import android.text.SpannableStringBuilder
+import android.text.style.AlignmentSpan
 import android.util.Log
 import com.swmansion.enriched.common.EnrichedConstants
 import com.swmansion.enriched.textinput.EnrichedTextInputView
@@ -542,6 +544,52 @@ class ParagraphStyles(
   }
 
   fun getStyleRange(): Pair<Int, Int> = view.selection?.getParagraphSelection() ?: Pair(0, 0)
+
+  fun setTextAlignment(alignment: Layout.Alignment?): Boolean {
+    val spannable = view.text as? SpannableStringBuilder ?: return false
+    val selection = view.selection ?: return false
+    val (start, end) = selection.getParagraphSelection()
+    if (start > end) return false
+
+    val spans = spannable.getSpans(start, end, AlignmentSpan::class.java)
+    for (span in spans) {
+      val spanStart = spannable.getSpanStart(span)
+      val spanEnd = spannable.getSpanEnd(span)
+      spannable.removeSpan(span)
+
+      if (spanStart < start) {
+        spannable.setSpan(
+          AlignmentSpan.Standard(span.alignment),
+          spanStart,
+          start,
+          Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+      }
+      if (spanEnd > end) {
+        spannable.setSpan(
+          AlignmentSpan.Standard(span.alignment),
+          end,
+          spanEnd,
+          Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+      }
+    }
+
+    if (alignment != null) {
+      val (safeStart, safeEnd) = spannable.getSafeSpanBoundaries(start, end)
+      spannable.setSpan(
+        AlignmentSpan.Standard(alignment),
+        safeStart,
+        safeEnd,
+        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+      )
+    }
+
+    selection.validateStyles()
+    view.layoutManager.invalidateLayout()
+    view.spanWatcher?.emitEvent(spannable, null)
+    return true
+  }
 
   fun removeStyle(
     name: String,

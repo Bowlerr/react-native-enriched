@@ -5,6 +5,7 @@ import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import com.swmansion.enriched.common.EnrichedConstants
+import com.swmansion.enriched.common.spans.interfaces.EnrichedListSpan
 import com.swmansion.enriched.textinput.EnrichedTextInputView
 import com.swmansion.enriched.textinput.spans.EnrichedInputCheckboxListSpan
 import com.swmansion.enriched.textinput.spans.EnrichedInputOrderedListSpan
@@ -34,24 +35,27 @@ class ListStyles(
     return null
   }
 
-  private fun <T> isPreviousParagraphList(
-    spannable: Spannable,
-    s: Int,
-    type: Class<T>,
-  ): Boolean {
-    val previousSpan = getPreviousParagraphSpan(spannable, s, type)
-
-    return previousSpan != null
-  }
-
   private fun getOrderedListIndex(
     spannable: Spannable,
     s: Int,
+    level: Int = 0,
   ): Int {
     val span = getPreviousParagraphSpan(spannable, s, EnrichedInputOrderedListSpan::class.java)
-    val index = span?.getListIndex() ?: 0
+    val index =
+      if (span?.level == level) {
+        span.getListIndex()
+      } else {
+        0
+      }
     return index + 1
   }
+
+  private fun getListLevel(span: Any?): Int = (span as? EnrichedListSpan)?.level ?: 0
+
+  private fun getDeepestListSpan(spans: Array<out Any>): EnrichedListSpan? =
+    spans
+      .filterIsInstance<EnrichedListSpan>()
+      .maxByOrNull { it.level }
 
   private fun setSpan(
     spannable: Spannable,
@@ -59,23 +63,24 @@ class ListStyles(
     start: Int,
     end: Int,
     isChecked: Boolean? = false,
+    level: Int = 0,
   ) {
     val (safeStart, safeEnd) = spannable.getSafeSpanBoundaries(start, end)
 
     when (name) {
       EnrichedSpans.UNORDERED_LIST -> {
-        val span = EnrichedInputUnorderedListSpan(view.htmlStyle)
+        val span = EnrichedInputUnorderedListSpan(view.htmlStyle, level)
         spannable.setSpan(span, safeStart, safeEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
       }
 
       EnrichedSpans.ORDERED_LIST -> {
-        val index = getOrderedListIndex(spannable, safeStart)
-        val span = EnrichedInputOrderedListSpan(index, view.htmlStyle)
+        val index = getOrderedListIndex(spannable, safeStart, level)
+        val span = EnrichedInputOrderedListSpan(index, view.htmlStyle, level)
         spannable.setSpan(span, safeStart, safeEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
       }
 
       EnrichedSpans.CHECKBOX_LIST -> {
-        val span = EnrichedInputCheckboxListSpan(isChecked ?: false, view.htmlStyle)
+        val span = EnrichedInputCheckboxListSpan(isChecked ?: false, view.htmlStyle, level)
         spannable.setSpan(span, safeStart, safeEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
 
         // Invalidate layout to update checkbox drawing in case checkbox is bigger than line height
@@ -106,12 +111,31 @@ class ListStyles(
     text: Spannable,
     position: Int,
   ) {
-    val spans = text.getSpans(position + 1, text.length, EnrichedInputOrderedListSpan::class.java)
-    val sortedSpans = spans.sortedBy { text.getSpanStart(it) }
-    for (span in sortedSpans) {
-      val spanStart = text.getSpanStart(span)
-      val index = getOrderedListIndex(text, spanStart)
-      span.setListIndex(index)
+    val counters = mutableMapOf<Int, Int>()
+    var paragraphStart = 0
+
+    while (paragraphStart < text.length) {
+      val (start, end) = text.getParagraphBounds(paragraphStart)
+      val orderedSpans =
+        text
+          .getSpans(start, end, EnrichedInputOrderedListSpan::class.java)
+          .filter { text.getSpanStart(it) == start }
+
+      if (orderedSpans.isEmpty()) {
+        counters.clear()
+      } else {
+        val span = orderedSpans.maxByOrNull { it.level } ?: orderedSpans[0]
+        val level = span.level.coerceAtLeast(0)
+        counters.keys.filter { it > level }.forEach { counters.remove(it) }
+        val nextIndex = (counters[level] ?: 0) + 1
+        counters[level] = nextIndex
+        span.setListIndex(nextIndex)
+      }
+
+      if (end >= text.length) {
+        break
+      }
+      paragraphStart = end + 1
     }
   }
 
@@ -194,7 +218,8 @@ class ListStyles(
       return
     }
 
-    if (!isBackspace && isNewLine && isPreviousParagraphList(s, start, config.clazz)) {
+    val previousListSpan = getPreviousParagraphSpan(s, start, config.clazz)
+    if (!isBackspace && isNewLine && previousListSpan != null) {
       // Check if the span from the previous line "leaked" into this one
       if (spans.isNotEmpty()) {
         val existingSpan = spans[0]
@@ -209,7 +234,13 @@ class ListStyles(
       }
 
       s.insert(cursorPosition, EnrichedConstants.ZWS_STRING)
-      setSpan(s, name, start, end + 1)
+      val previousChecked =
+        if (previousListSpan is EnrichedInputCheckboxListSpan) {
+          previousListSpan.isChecked
+        } else {
+          false
+        }
+      setSpan(s, name, start, end + 1, previousChecked, getListLevel(previousListSpan))
       // Inform that new span has been added
       view.selection?.validateStyles()
       return
@@ -217,25 +248,30 @@ class ListStyles(
 
     if (name === EnrichedSpans.CHECKBOX_LIST) {
       if (spans.isNotEmpty()) {
-        val previousSpan = spans[0] as EnrichedInputCheckboxListSpan
+        val previousSpan =
+          spans
+            .filterIsInstance<EnrichedInputCheckboxListSpan>()
+            .maxByOrNull { it.level } ?: spans[0] as EnrichedInputCheckboxListSpan
         val isChecked = previousSpan.isChecked
+        val level = previousSpan.level
 
         for (span in spans) {
           s.removeSpan(span)
         }
 
-        setSpan(s, EnrichedSpans.CHECKBOX_LIST, start, end, isChecked)
+        setSpan(s, EnrichedSpans.CHECKBOX_LIST, start, end, isChecked, level)
       }
 
       return
     }
 
     if (spans.isNotEmpty()) {
+      val level = getDeepestListSpan(spans)?.level ?: 0
       for (span in spans) {
         s.removeSpan(span)
       }
 
-      setSpan(s, name, start, end)
+      setSpan(s, name, start, end, false, level)
     }
   }
 
@@ -250,6 +286,74 @@ class ListStyles(
   }
 
   fun getStyleRange(): Pair<Int, Int> = view.selection?.getParagraphSelection() ?: Pair(0, 0)
+
+  private fun getSelectedParagraphRanges(spannable: SpannableStringBuilder): List<Pair<Int, Int>> {
+    val selection = view.selection ?: return emptyList()
+    val (selectionStart, selectionEnd) = selection.getParagraphSelection()
+    if (spannable.isEmpty()) return emptyList()
+
+    val ranges = mutableListOf<Pair<Int, Int>>()
+    var current = selectionStart.coerceAtLeast(0).coerceAtMost(spannable.length)
+    val finalEnd = selectionEnd.coerceAtLeast(current).coerceAtMost(spannable.length)
+
+    while (current <= finalEnd) {
+      val (paragraphStart, paragraphEnd) = spannable.getParagraphBounds(current)
+      ranges.add(Pair(paragraphStart, paragraphEnd))
+
+      if (paragraphEnd >= finalEnd || paragraphEnd >= spannable.length) {
+        break
+      }
+
+      current = paragraphEnd + 1
+    }
+
+    return ranges
+  }
+
+  private fun getParagraphListSpans(
+    spannable: SpannableStringBuilder,
+    paragraphStart: Int,
+    paragraphEnd: Int,
+  ): Array<EnrichedListSpan> =
+    listOf(
+      *spannable.getSpans(paragraphStart, paragraphEnd, EnrichedInputUnorderedListSpan::class.java),
+      *spannable.getSpans(paragraphStart, paragraphEnd, EnrichedInputOrderedListSpan::class.java),
+      *spannable.getSpans(paragraphStart, paragraphEnd, EnrichedInputCheckboxListSpan::class.java),
+    ).filterIsInstance<EnrichedListSpan>()
+      .toTypedArray()
+
+  private fun adjustListLevel(delta: Int): Boolean {
+    val spannable = view.text as? SpannableStringBuilder ?: return false
+    val ranges = getSelectedParagraphRanges(spannable)
+    if (ranges.isEmpty()) return false
+
+    var changed = false
+    var firstChangedStart = Int.MAX_VALUE
+
+    for ((paragraphStart, paragraphEnd) in ranges) {
+      val span = getDeepestListSpan(getParagraphListSpans(spannable, paragraphStart, paragraphEnd)) ?: continue
+      val nextLevel = (span.level + delta).coerceAtLeast(0)
+      if (nextLevel == span.level) continue
+
+      span.level = nextLevel
+      firstChangedStart = minOf(firstChangedStart, paragraphStart)
+      changed = true
+    }
+
+    if (!changed) return false
+
+    if (firstChangedStart != Int.MAX_VALUE) {
+      updateOrderedListIndexes(spannable, firstChangedStart)
+    }
+    view.selection?.validateStyles()
+    view.layoutManager.invalidateLayout()
+    view.spanWatcher?.emitEvent(spannable, null)
+    return true
+  }
+
+  fun increaseListLevel(): Boolean = adjustListLevel(1)
+
+  fun decreaseListLevel(): Boolean = adjustListLevel(-1)
 
   fun removeStyle(
     name: String,

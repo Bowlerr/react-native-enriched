@@ -29,10 +29,12 @@ import com.swmansion.enriched.common.spans.EnrichedUnderlineSpan;
 import com.swmansion.enriched.common.spans.EnrichedUnorderedListSpan;
 import com.swmansion.enriched.common.spans.interfaces.EnrichedBlockSpan;
 import com.swmansion.enriched.common.spans.interfaces.EnrichedInlineSpan;
+import com.swmansion.enriched.common.spans.interfaces.EnrichedListSpan;
 import com.swmansion.enriched.common.spans.interfaces.EnrichedParagraphSpan;
 import com.swmansion.enriched.common.spans.interfaces.EnrichedZeroWidthSpaceSpan;
 import java.io.IOException;
 import java.io.StringReader;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
 import org.ccil.cowan.tagsoup.HTMLSchema;
@@ -127,7 +129,7 @@ public class EnrichedParser {
       }
 
       for (EnrichedBlockSpan ignored : blocks) {
-        out.append("<").append(tag).append(">\n");
+        out.append("<").append(tag).append(getAlignmentStyle(text, i, next)).append(">\n");
       }
       withinBlock(out, text, i, next);
       for (EnrichedBlockSpan ignored : blocks) {
@@ -137,14 +139,27 @@ public class EnrichedParser {
   }
 
   private static String getBlockTag(EnrichedParagraphSpan[] spans) {
+    EnrichedListSpan deepestList = null;
+
     for (EnrichedParagraphSpan span : spans) {
-      if (span instanceof EnrichedUnorderedListSpan) {
-        return "ul";
-      } else if (span instanceof EnrichedOrderedListSpan) {
-        return "ol";
-      } else if (span instanceof EnrichedCheckboxListSpan) {
-        return "ul data-type=\"checkbox\"";
-      } else if (span instanceof EnrichedH1Span) {
+      if (span instanceof EnrichedListSpan) {
+        EnrichedListSpan listSpan = (EnrichedListSpan) span;
+        if (deepestList == null || listSpan.getLevel() >= deepestList.getLevel()) {
+          deepestList = listSpan;
+        }
+      }
+    }
+
+    if (deepestList instanceof EnrichedUnorderedListSpan) {
+      return "ul";
+    } else if (deepestList instanceof EnrichedOrderedListSpan) {
+      return "ol";
+    } else if (deepestList instanceof EnrichedCheckboxListSpan) {
+      return "ul data-type=\"checkbox\"";
+    }
+
+    for (EnrichedParagraphSpan span : spans) {
+      if (span instanceof EnrichedH1Span) {
         return "h1";
       } else if (span instanceof EnrichedH2Span) {
         return "h2";
@@ -160,6 +175,26 @@ public class EnrichedParser {
     }
 
     return "p";
+  }
+
+  private static String getAlignmentStyle(Spanned text, int start, int end) {
+    AlignmentSpan[] alignmentSpans = text.getSpans(start, end, AlignmentSpan.class);
+    if (alignmentSpans.length == 0) {
+      return "";
+    }
+
+    Layout.Alignment alignment = alignmentSpans[alignmentSpans.length - 1].getAlignment();
+    if (alignment == Layout.Alignment.ALIGN_CENTER) {
+      return " style=\"text-align: center\"";
+    }
+    if (alignment == Layout.Alignment.ALIGN_OPPOSITE) {
+      return " style=\"text-align: right\"";
+    }
+    if (alignment == Layout.Alignment.ALIGN_NORMAL) {
+      return " style=\"text-align: left\"";
+    }
+
+    return "";
   }
 
   private static void withinBlock(StringBuilder out, Spanned text, int start, int end) {
@@ -239,6 +274,7 @@ public class EnrichedParser {
           }
         }
 
+        out.append(getAlignmentStyle(text, i, next));
         out.append(">");
         withinParagraph(out, text, i, next);
         out.append("</");
@@ -391,9 +427,7 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
   private final String mSource;
   private final XMLReader mReader;
   private final SpannableStringBuilder mSpannableStringBuilder;
-  private static Integer currentOrderedListItemIndex = 0;
-  private static Boolean isInOrderedList = false;
-  private static Boolean isInCheckboxList = false;
+  private final ArrayDeque<ListContext> mListStack = new ArrayDeque<>();
   private static Boolean isEmptyTag = false;
 
   public HtmlToSpannedConverter(
@@ -439,6 +473,8 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       }
     }
 
+    trimParentListSpansFromNestedParagraphs();
+
     // Assign zero-width space character to the proper spans.
     EnrichedZeroWidthSpaceSpan[] zeroWidthSpaceSpans =
         mSpannableStringBuilder.getSpans(
@@ -461,22 +497,106 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     return mSpannableStringBuilder;
   }
 
+  private void trimParentListSpansFromNestedParagraphs() {
+    int textLength = mSpannableStringBuilder.length();
+    int paragraphStart = 0;
+
+    while (paragraphStart < textLength) {
+      int paragraphEnd = TextUtils.indexOf(mSpannableStringBuilder, '\n', paragraphStart);
+      if (paragraphEnd < 0) {
+        paragraphEnd = textLength;
+      }
+
+      trimParentListSpansFromParagraph(paragraphStart, paragraphEnd);
+
+      if (paragraphEnd >= textLength) {
+        break;
+      }
+      paragraphStart = paragraphEnd + 1;
+    }
+  }
+
+  private void trimParentListSpansFromParagraph(int paragraphStart, int paragraphEnd) {
+    if (paragraphStart >= paragraphEnd) {
+      return;
+    }
+
+    EnrichedListSpan[] listSpans =
+        mSpannableStringBuilder.getSpans(paragraphStart, paragraphEnd, EnrichedListSpan.class);
+    if (listSpans.length <= 1) {
+      return;
+    }
+
+    int deepestLevel = 0;
+    for (EnrichedListSpan span : listSpans) {
+      deepestLevel = Math.max(deepestLevel, span.getLevel());
+    }
+
+    for (EnrichedListSpan span : listSpans) {
+      if (span.getLevel() < deepestLevel) {
+        trimListSpanFromRange(span, paragraphStart, paragraphEnd);
+      }
+    }
+  }
+
+  private void trimListSpanFromRange(EnrichedListSpan span, int rangeStart, int rangeEnd) {
+    int spanStart = mSpannableStringBuilder.getSpanStart(span);
+    int spanEnd = mSpannableStringBuilder.getSpanEnd(span);
+    int flags = mSpannableStringBuilder.getSpanFlags(span);
+
+    if (spanStart < 0 || spanEnd < 0 || spanStart >= spanEnd) {
+      return;
+    }
+
+    int trimStart = Math.max(spanStart, rangeStart);
+    int trimEnd = Math.min(spanEnd, rangeEnd);
+    if (trimStart >= trimEnd) {
+      return;
+    }
+
+    mSpannableStringBuilder.removeSpan(span);
+
+    if (spanStart < trimStart) {
+      mSpannableStringBuilder.setSpan(copyListSpan(span), spanStart, trimStart, flags);
+    }
+    if (trimEnd < spanEnd) {
+      mSpannableStringBuilder.setSpan(copyListSpan(span), trimEnd, spanEnd, flags);
+    }
+  }
+
+  private EnrichedListSpan copyListSpan(EnrichedListSpan span) {
+    EnrichedListSpan copy;
+
+    if (span instanceof EnrichedOrderedListSpan) {
+      copy =
+          mSpanFactory.createOrderedListSpan(((EnrichedOrderedListSpan) span).getIndex(), mStyle);
+    } else if (span instanceof EnrichedCheckboxListSpan) {
+      copy =
+          mSpanFactory.createCheckboxListSpan(
+              ((EnrichedCheckboxListSpan) span).isChecked(), mStyle);
+    } else {
+      copy = mSpanFactory.createUnorderedListSpan(mStyle);
+    }
+
+    copy.setLevel(span.getLevel());
+    return copy;
+  }
+
   private void handleStartTag(String tag, Attributes attributes) {
     if (tag.equalsIgnoreCase("br")) {
       // We don't need to handle this. TagSoup will ensure that there's a </br> for each <br>
       // so we can safely emit the linebreaks when we handle the close tag.
     } else if (tag.equalsIgnoreCase("p")) {
       isEmptyTag = true;
-      startBlockElement(mSpannableStringBuilder);
+      startBlockElement(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("ul")) {
-      isInOrderedList = false;
       String dataType = attributes.getValue("", "data-type");
-      isInCheckboxList = "checkbox".equals(dataType);
-      startBlockElement(mSpannableStringBuilder);
+      mListStack.addLast(
+          new ListContext("checkbox".equalsIgnoreCase(dataType) ? "checked" : "unordered"));
+      startBlockElement(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("ol")) {
-      isInOrderedList = true;
-      currentOrderedListItemIndex = 0;
-      startBlockElement(mSpannableStringBuilder);
+      mListStack.addLast(new ListContext("ordered"));
+      startBlockElement(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("li")) {
       isEmptyTag = true;
       startLi(mSpannableStringBuilder, attributes);
@@ -486,10 +606,10 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       start(mSpannableStringBuilder, new Italic());
     } else if (tag.equalsIgnoreCase("blockquote")) {
       isEmptyTag = true;
-      startBlockquote(mSpannableStringBuilder);
+      startBlockquote(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("codeblock")) {
       isEmptyTag = true;
-      startCodeBlock(mSpannableStringBuilder);
+      startCodeBlock(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("a")) {
       startA(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("u")) {
@@ -499,17 +619,17 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     } else if (tag.equalsIgnoreCase("strike")) {
       start(mSpannableStringBuilder, new Strikethrough());
     } else if (tag.equalsIgnoreCase("h1")) {
-      startHeading(mSpannableStringBuilder, 1);
+      startHeading(mSpannableStringBuilder, 1, attributes);
     } else if (tag.equalsIgnoreCase("h2")) {
-      startHeading(mSpannableStringBuilder, 2);
+      startHeading(mSpannableStringBuilder, 2, attributes);
     } else if (tag.equalsIgnoreCase("h3")) {
-      startHeading(mSpannableStringBuilder, 3);
+      startHeading(mSpannableStringBuilder, 3, attributes);
     } else if (tag.equalsIgnoreCase("h4")) {
-      startHeading(mSpannableStringBuilder, 4);
+      startHeading(mSpannableStringBuilder, 4, attributes);
     } else if (tag.equalsIgnoreCase("h5")) {
-      startHeading(mSpannableStringBuilder, 5);
+      startHeading(mSpannableStringBuilder, 5, attributes);
     } else if (tag.equalsIgnoreCase("h6")) {
-      startHeading(mSpannableStringBuilder, 6);
+      startHeading(mSpannableStringBuilder, 6, attributes);
     } else if (tag.equalsIgnoreCase("img")) {
       // Image content means the current tag is not empty (e.g. <li><img .../></li>).
       isEmptyTag = false;
@@ -528,6 +648,14 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       endBlockElement(mSpannableStringBuilder);
     } else if (tag.equalsIgnoreCase("ul")) {
       endBlockElement(mSpannableStringBuilder);
+      if (!mListStack.isEmpty()) {
+        mListStack.removeLast();
+      }
+    } else if (tag.equalsIgnoreCase("ol")) {
+      endBlockElement(mSpannableStringBuilder);
+      if (!mListStack.isEmpty()) {
+        mListStack.removeLast();
+      }
     } else if (tag.equalsIgnoreCase("li")) {
       endLi(mSpannableStringBuilder, mStyle, mSpanFactory);
     } else if (tag.equalsIgnoreCase("b")) {
@@ -581,8 +709,54 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
   }
 
   private static void startBlockElement(Editable text) {
+    startBlockElement(text, null);
+  }
+
+  private static void startBlockElement(Editable text, Attributes attributes) {
     appendNewlines(text, 1);
     start(text, new Newline(1));
+    Layout.Alignment alignment = getAlignmentFromAttributes(attributes);
+    if (alignment != null) {
+      start(text, new Alignment(alignment));
+    }
+  }
+
+  private static Layout.Alignment getAlignmentFromAttributes(Attributes attributes) {
+    if (attributes == null) return null;
+
+    String style = attributes.getValue("", "style");
+    if (style == null) return null;
+
+    String[] declarations = style.split(";");
+    for (String declaration : declarations) {
+      String[] parts = declaration.split(":", 2);
+      if (parts.length != 2 || !parts[0].trim().equalsIgnoreCase("text-align")) {
+        continue;
+      }
+
+      String value = parts[1].trim().toLowerCase();
+      if (value.startsWith("center")) {
+        return Layout.Alignment.ALIGN_CENTER;
+      }
+      if (value.startsWith("right")) {
+        return Layout.Alignment.ALIGN_OPPOSITE;
+      }
+      if (value.startsWith("left") || value.startsWith("justify")) {
+        return Layout.Alignment.ALIGN_NORMAL;
+      }
+    }
+
+    return null;
+  }
+
+  private static boolean isTruthyAttribute(String value) {
+    if (value == null) return false;
+    if (value.isEmpty()) return true;
+
+    return value.equalsIgnoreCase("true")
+        || value.equalsIgnoreCase("1")
+        || value.equalsIgnoreCase("yes")
+        || value.equalsIgnoreCase("checked");
   }
 
   private static void endBlockElement(Editable text) {
@@ -602,16 +776,18 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
   }
 
   private void startLi(Editable text, Attributes attributes) {
-    startBlockElement(text);
+    startBlockElement(text, attributes);
+    ListContext context = mListStack.peekLast();
+    int level = Math.max(0, mListStack.size() - 1);
 
-    if (isInOrderedList) {
-      currentOrderedListItemIndex++;
-      start(text, new List("ordered", currentOrderedListItemIndex, false));
-    } else if (isInCheckboxList) {
+    if (context != null && context.mType.equals("ordered")) {
+      context.mIndex++;
+      start(text, new List("ordered", context.mIndex, false, level));
+    } else if (context != null && context.mType.equals("checked")) {
       String isChecked = attributes.getValue("", "checked");
-      start(text, new List("checked", 0, "checked".equals(isChecked)));
+      start(text, new List("checked", 0, isTruthyAttribute(isChecked), level));
     } else {
-      start(text, new List("unordered", 0, false));
+      start(text, new List("unordered", 0, false, level));
     }
   }
 
@@ -621,19 +797,25 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     List l = getLast(text, List.class);
     if (l != null) {
       if (l.mType.equals("ordered")) {
-        setParagraphSpanFromMark(text, l, spanFactory.createOrderedListSpan(l.mIndex, style));
+        EnrichedOrderedListSpan span = spanFactory.createOrderedListSpan(l.mIndex, style);
+        span.setLevel(l.mLevel);
+        setParagraphSpanFromMark(text, l, span);
       } else if (l.mType.equals("checked")) {
-        setParagraphSpanFromMark(text, l, spanFactory.createCheckboxListSpan(l.mChecked, style));
+        EnrichedCheckboxListSpan span = spanFactory.createCheckboxListSpan(l.mChecked, style);
+        span.setLevel(l.mLevel);
+        setParagraphSpanFromMark(text, l, span);
       } else {
-        setParagraphSpanFromMark(text, l, spanFactory.createUnorderedListSpan(style));
+        EnrichedUnorderedListSpan span = spanFactory.createUnorderedListSpan(style);
+        span.setLevel(l.mLevel);
+        setParagraphSpanFromMark(text, l, span);
       }
     }
 
     endBlockElement(text);
   }
 
-  private void startBlockquote(Editable text) {
-    startBlockElement(text);
+  private void startBlockquote(Editable text, Attributes attributes) {
+    startBlockElement(text, attributes);
     start(text, new Blockquote());
   }
 
@@ -644,8 +826,8 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     setParagraphSpanFromMark(text, last, spanFactory.createBlockQuoteSpan(style));
   }
 
-  private void startCodeBlock(Editable text) {
-    startBlockElement(text);
+  private void startCodeBlock(Editable text, Attributes attributes) {
+    startBlockElement(text, attributes);
     start(text, new CodeBlock());
   }
 
@@ -655,8 +837,8 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     setParagraphSpanFromMark(text, last, spanFactory.createCodeBlockSpan(style));
   }
 
-  private void startHeading(Editable text, int level) {
-    startBlockElement(text);
+  private void startHeading(Editable text, int level, Attributes attributes) {
+    startBlockElement(text, attributes);
 
     switch (level) {
       case 1:
@@ -919,13 +1101,24 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
 
   private static class List {
     public int mIndex;
+    public int mLevel;
     public String mType;
     public boolean mChecked;
 
-    public List(String type, int index, boolean checked) {
+    public List(String type, int index, boolean checked, int level) {
       mType = type;
       mIndex = index;
       mChecked = checked;
+      mLevel = level;
+    }
+  }
+
+  private static class ListContext {
+    public int mIndex = 0;
+    public String mType;
+
+    public ListContext(String type) {
+      mType = type;
     }
   }
 

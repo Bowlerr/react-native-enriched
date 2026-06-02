@@ -1,6 +1,7 @@
 package com.swmansion.enriched.textinput
 
 import android.content.Context
+import android.text.Layout
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.module.annotations.ReactModule
@@ -398,11 +399,15 @@ class EnrichedTextInputViewManager :
   }
 
   override fun increaseListLevel(view: EnrichedTextInputView?) {
-    view?.paragraphStyles?.increaseBlockQuoteLevel()
+    if (view?.listStyles?.increaseListLevel() != true) {
+      view?.paragraphStyles?.increaseBlockQuoteLevel()
+    }
   }
 
   override fun decreaseListLevel(view: EnrichedTextInputView?) {
-    view?.paragraphStyles?.decreaseBlockQuoteLevel()
+    if (view?.listStyles?.decreaseListLevel() != true) {
+      view?.paragraphStyles?.decreaseBlockQuoteLevel()
+    }
   }
 
   override fun addLink(
@@ -460,7 +465,14 @@ class EnrichedTextInputViewManager :
     view: EnrichedTextInputView?,
     alignment: String,
   ) {
-    TODO("Not yet implemented")
+    val layoutAlignment =
+      when (alignment) {
+        "center" -> Layout.Alignment.ALIGN_CENTER
+        "right" -> Layout.Alignment.ALIGN_OPPOSITE
+        "left", "justify" -> Layout.Alignment.ALIGN_NORMAL
+        else -> null
+      }
+    view?.paragraphStyles?.setTextAlignment(layoutAlignment)
   }
 
   override fun measure(

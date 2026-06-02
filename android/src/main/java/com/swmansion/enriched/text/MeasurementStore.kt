@@ -17,6 +17,7 @@ import com.facebook.react.views.text.ReactTypefaceUtils.parseFontWeight
 import com.facebook.yoga.YogaMeasureMode
 import com.facebook.yoga.YogaMeasureOutput
 import com.swmansion.enriched.common.EnrichedConstants
+import com.swmansion.enriched.common.GumboNormalizer
 import com.swmansion.enriched.common.parser.EnrichedParser
 import kotlin.math.ceil
 
@@ -102,14 +103,29 @@ object MeasurementStore {
     props: ReadableMap?,
   ): CharSequence {
     val text = props?.getString("text") ?: ""
+    val style = props?.getMap("htmlStyle")
+    val factory = EnrichedTextSpanFactory()
 
     val isHtml = text.startsWith("<html>") && text.endsWith("</html>")
-    if (!isHtml) return text
+    if (!isHtml) {
+      val useHtmlNormalizer =
+        props?.hasKey("useHtmlNormalizer") == true && props.getBoolean("useHtmlNormalizer")
+      if (!useHtmlNormalizer) return text
+
+      val normalized = GumboNormalizer.normalizeHtml(text) ?: return text
+      return try {
+        val enrichedStyle = EnrichedTextStyle.fromReadableMap(context as ReactContext, fontSize, style ?: return text)
+        val parsed = EnrichedParser.fromHtml(normalized, enrichedStyle, factory)
+        parsed.trimEnd('\n')
+      } catch (e: Exception) {
+        Log.w("MeasurementStore", "Error parsing normalized HTML text: ${e.message}")
+        text
+      }
+    }
 
     try {
-      val style = props?.getMap("htmlStyle") ?: return text
+      if (style == null) return text
       val enrichedStyle = EnrichedTextStyle.fromReadableMap(context as ReactContext, fontSize, style)
-      val factory = EnrichedTextSpanFactory()
       val parsed = EnrichedParser.fromHtml(text, enrichedStyle, factory)
       return parsed.trimEnd('\n')
     } catch (e: Exception) {

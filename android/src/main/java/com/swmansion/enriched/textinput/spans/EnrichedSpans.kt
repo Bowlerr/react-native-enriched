@@ -171,7 +171,7 @@ object EnrichedSpans {
 
       BLOCK_QUOTE -> {
         StylesMergingConfig(
-          conflictingStyles = arrayOf(H1, H2, H3, H4, H5, H6, CODE_BLOCK, ORDERED_LIST, UNORDERED_LIST, CHECKBOX_LIST),
+          conflictingStyles = arrayOf(H1, H2, H3, H4, H5, H6),
         )
       }
 
@@ -202,19 +202,19 @@ object EnrichedSpans {
 
       UNORDERED_LIST -> {
         StylesMergingConfig(
-          conflictingStyles = arrayOf(H1, H2, H3, H4, H5, H6, ORDERED_LIST, CHECKBOX_LIST, CODE_BLOCK, BLOCK_QUOTE),
+          conflictingStyles = arrayOf(H1, H2, H3, H4, H5, H6, ORDERED_LIST, CHECKBOX_LIST, CODE_BLOCK),
         )
       }
 
       ORDERED_LIST -> {
         StylesMergingConfig(
-          conflictingStyles = arrayOf(H1, H2, H3, H4, H5, H6, UNORDERED_LIST, CHECKBOX_LIST, CODE_BLOCK, BLOCK_QUOTE),
+          conflictingStyles = arrayOf(H1, H2, H3, H4, H5, H6, UNORDERED_LIST, CHECKBOX_LIST, CODE_BLOCK),
         )
       }
 
       CHECKBOX_LIST -> {
         StylesMergingConfig(
-          conflictingStyles = arrayOf(H1, H2, H3, H4, H5, H6, UNORDERED_LIST, ORDERED_LIST, CODE_BLOCK, BLOCK_QUOTE),
+          conflictingStyles = arrayOf(H1, H2, H3, H4, H5, H6, UNORDERED_LIST, ORDERED_LIST, CODE_BLOCK),
         )
       }
 

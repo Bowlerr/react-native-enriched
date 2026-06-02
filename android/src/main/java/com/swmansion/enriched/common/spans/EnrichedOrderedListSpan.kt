@@ -5,18 +5,20 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Build
 import android.text.Layout
+import android.text.Spanned
 import android.text.TextPaint
 import android.text.style.LeadingMarginSpan
 import android.text.style.MetricAffectingSpan
 import com.swmansion.enriched.common.EnrichedStyle
-import com.swmansion.enriched.common.spans.interfaces.EnrichedParagraphSpan
+import com.swmansion.enriched.common.spans.interfaces.EnrichedListSpan
 
 open class EnrichedOrderedListSpan(
   var index: Int,
   private val enrichedStyle: EnrichedStyle,
+  override var level: Int = 0,
 ) : MetricAffectingSpan(),
   LeadingMarginSpan,
-  EnrichedParagraphSpan {
+  EnrichedListSpan {
   override fun updateMeasureState(p0: TextPaint) {
     // Do nothing, but inform layout that this span affects text metrics
   }
@@ -25,7 +27,7 @@ open class EnrichedOrderedListSpan(
     // Do nothing, but inform layout that this span affects text metrics
   }
 
-  override fun getLeadingMargin(first: Boolean): Int = enrichedStyle.olMarginLeft + enrichedStyle.olGapWidth
+  override fun getLeadingMargin(first: Boolean): Int = listMargin() + enrichedStyle.olGapWidth
 
   override fun drawLeadingMargin(
     canvas: Canvas,
@@ -41,12 +43,14 @@ open class EnrichedOrderedListSpan(
     first: Boolean,
     layout: Layout?,
   ) {
-    if (first) {
+    val spannedText = t as? Spanned ?: return
+
+    if (first && spannedText.getSpanStart(this) == start) {
       val text = "$index."
       val width = paint.measureText(text)
 
       val yPosition = baseline.toFloat()
-      val xPosition = (enrichedStyle.olMarginLeft + x - width / 2) * dir
+      val xPosition = x + dir * (listMargin() - width / 2)
 
       val originalColor = paint.color
       val originalTypeface = paint.typeface
@@ -76,4 +80,6 @@ open class EnrichedOrderedListSpan(
         Typeface.create(originalTypeface, Typeface.NORMAL)
       }
     }
+
+  private fun listMargin(): Int = enrichedStyle.olMarginLeft * (level.coerceAtLeast(0) + 1)
 }

@@ -11,16 +11,16 @@ import android.text.style.MetricAffectingSpan
 import androidx.core.graphics.withTranslation
 import com.swmansion.enriched.common.CheckboxDrawable
 import com.swmansion.enriched.common.EnrichedStyle
-import com.swmansion.enriched.common.spans.interfaces.EnrichedParagraphSpan
-import com.swmansion.enriched.textinput.styles.HtmlStyle
+import com.swmansion.enriched.common.spans.interfaces.EnrichedListSpan
 
 open class EnrichedCheckboxListSpan(
   open var isChecked: Boolean,
   private val enrichedStyle: EnrichedStyle,
+  override var level: Int = 0,
 ) : MetricAffectingSpan(),
   LineHeightSpan,
   LeadingMarginSpan,
-  EnrichedParagraphSpan {
+  EnrichedListSpan {
   private val checkboxDrawable =
     CheckboxDrawable(enrichedStyle.ulCheckboxBoxSize, enrichedStyle.ulCheckboxBoxColor, isChecked).apply {
       setBounds(0, 0, enrichedStyle.ulCheckboxBoxSize, enrichedStyle.ulCheckboxBoxSize)
@@ -58,8 +58,7 @@ open class EnrichedCheckboxListSpan(
     }
   }
 
-  override fun getLeadingMargin(first: Boolean): Int =
-    enrichedStyle.ulCheckboxBoxSize + enrichedStyle.ulCheckboxMarginLeft + enrichedStyle.ulCheckboxGapWidth
+  override fun getLeadingMargin(first: Boolean): Int = enrichedStyle.ulCheckboxBoxSize + listMargin() + enrichedStyle.ulCheckboxGapWidth
 
   override fun drawLeadingMargin(
     canvas: Canvas,
@@ -84,9 +83,11 @@ open class EnrichedCheckboxListSpan(
       val textCenter = baseline + (fm.ascent + fm.descent) / 2f
       val drawableTop = textCenter - (enrichedStyle.ulCheckboxBoxSize / 2f)
 
-      canvas.withTranslation(x.toFloat() + enrichedStyle.ulCheckboxMarginLeft, drawableTop) {
+      canvas.withTranslation(x.toFloat() + listMargin(), drawableTop) {
         checkboxDrawable.draw(this)
       }
     }
   }
+
+  private fun listMargin(): Int = enrichedStyle.ulCheckboxMarginLeft * (level.coerceAtLeast(0) + 1)
 }
