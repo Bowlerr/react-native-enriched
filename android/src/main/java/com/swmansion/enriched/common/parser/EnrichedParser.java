@@ -498,6 +498,8 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
           zeroWidthSpaceSpan, start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
 
+    trimParentListSpansFromNestedParagraphs();
+
     return mSpannableStringBuilder;
   }
 
@@ -560,11 +562,21 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
 
     mSpannableStringBuilder.removeSpan(span);
 
-    if (spanStart < trimStart) {
-      mSpannableStringBuilder.setSpan(copyListSpan(span), spanStart, trimStart, flags);
+    int beforeEnd = trimStart;
+    while (beforeEnd > spanStart && mSpannableStringBuilder.charAt(beforeEnd - 1) == '\n') {
+      beforeEnd--;
     }
-    if (trimEnd < spanEnd) {
-      mSpannableStringBuilder.setSpan(copyListSpan(span), trimEnd, spanEnd, flags);
+
+    int afterStart = trimEnd;
+    while (afterStart < spanEnd && mSpannableStringBuilder.charAt(afterStart) == '\n') {
+      afterStart++;
+    }
+
+    if (spanStart < beforeEnd) {
+      mSpannableStringBuilder.setSpan(copyListSpan(span), spanStart, beforeEnd, flags);
+    }
+    if (afterStart < spanEnd) {
+      mSpannableStringBuilder.setSpan(copyListSpan(span), afterStart, spanEnd, flags);
     }
   }
 

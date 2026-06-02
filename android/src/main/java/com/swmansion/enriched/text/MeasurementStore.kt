@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Typeface
 import android.graphics.text.LineBreaker
 import android.os.Build
+import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
@@ -45,7 +46,10 @@ object MeasurementStore {
         .setLineSpacing(0f, 1f)
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      builder.setBreakStrategy(LineBreaker.BREAK_STRATEGY_HIGH_QUALITY)
+      builder.setBreakStrategy(LineBreaker.BREAK_STRATEGY_SIMPLE)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      builder.setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
     }
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
