@@ -11,6 +11,7 @@ import android.text.style.LineBackgroundSpan
 import android.text.style.MetricAffectingSpan
 import com.swmansion.enriched.common.EnrichedStyle
 import com.swmansion.enriched.common.spans.interfaces.EnrichedBlockSpan
+import com.swmansion.enriched.common.spans.interfaces.EnrichedListSpan
 
 open class EnrichedCodeBlockSpan(
   private val enrichedStyle: EnrichedStyle,
@@ -72,10 +73,71 @@ open class EnrichedCodeBlockSpan(
       radii[7] = radius
     }
 
-    val rect = RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+    val backgroundLeft = codeBlockBackgroundLeft(text, start, end, left, right)
+    val rect = RectF(backgroundLeft, top.toFloat(), right.toFloat(), bottom.toFloat())
 
     path.addRoundRect(rect, radii, Path.Direction.CW)
     canvas.drawPath(path, p)
     p.color = previousColor
+  }
+
+  private fun codeBlockBackgroundLeft(
+    text: Spanned,
+    start: Int,
+    end: Int,
+    left: Int,
+    right: Int,
+  ): Float {
+    val listInset = parentListContentIndent(text, start, end)
+    if (listInset <= 0) {
+      return left.toFloat()
+    }
+
+    val insetLeft = left + listInset - CODE_BLOCK_HORIZONTAL_PADDING
+    val maxLeft = (right - 1).coerceAtLeast(left)
+    return insetLeft.coerceIn(left, maxLeft).toFloat()
+  }
+
+  private fun parentListContentIndent(
+    text: Spanned,
+    start: Int,
+    end: Int,
+  ): Int {
+    val codeBlockStart = text.getSpanStart(this)
+    if (codeBlockStart < 0) {
+      return 0
+    }
+
+    return text
+      .getSpans(start, end, EnrichedListSpan::class.java)
+      .filter { listSpan -> text.getSpanStart(listSpan) in 0..codeBlockStart }
+      .maxOfOrNull { listSpan -> listContentIndent(listSpan) }
+      ?: 0
+  }
+
+  private fun listContentIndent(listSpan: EnrichedListSpan): Int {
+    val level = listSpan.level.coerceAtLeast(0) + 1
+    return when (listSpan) {
+      is EnrichedCheckboxListSpan -> {
+        enrichedStyle.ulCheckboxMarginLeft * level + enrichedStyle.ulCheckboxGapWidth +
+          enrichedStyle.ulCheckboxBoxSize
+      }
+
+      is EnrichedOrderedListSpan -> {
+        enrichedStyle.olMarginLeft * level + enrichedStyle.olGapWidth
+      }
+
+      is EnrichedUnorderedListSpan -> {
+        enrichedStyle.ulMarginLeft * level + enrichedStyle.ulGapWidth + enrichedStyle.ulBulletSize
+      }
+
+      else -> {
+        0
+      }
+    }
+  }
+
+  companion object {
+    private const val CODE_BLOCK_HORIZONTAL_PADDING = 12
   }
 }

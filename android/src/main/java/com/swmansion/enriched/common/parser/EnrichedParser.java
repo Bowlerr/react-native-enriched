@@ -430,6 +430,7 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
   private final SpannableStringBuilder mSpannableStringBuilder;
   private final ArrayDeque<ListContext> mListStack = new ArrayDeque<>();
   private static Boolean isEmptyTag = false;
+  private int mCodeBlockDepth = 0;
 
   public HtmlToSpannedConverter(
       String source, T style, Parser parser, EnrichedSpanFactory<T> spanFactory) {
@@ -626,6 +627,7 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       startBlockquote(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("codeblock")) {
       isEmptyTag = true;
+      mCodeBlockDepth++;
       startCodeBlock(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("a")) {
       startA(mSpannableStringBuilder, attributes);
@@ -683,6 +685,9 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       endBlockquote(mSpannableStringBuilder, mStyle, mSpanFactory);
     } else if (tag.equalsIgnoreCase("codeblock")) {
       endCodeBlock(mSpannableStringBuilder, mStyle, mSpanFactory);
+      if (mCodeBlockDepth > 0) {
+        mCodeBlockDepth--;
+      }
     } else if (tag.equalsIgnoreCase("a")) {
       endA(mSpannableStringBuilder, mStyle, mSpanFactory);
     } else if (tag.equalsIgnoreCase("u")) {
@@ -1056,6 +1061,12 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
   }
 
   public void characters(char[] ch, int start, int length) {
+    if (mCodeBlockDepth > 0) {
+      if (length > 0) isEmptyTag = false;
+      mSpannableStringBuilder.append(new String(ch, start, length));
+      return;
+    }
+
     StringBuilder sb = new StringBuilder();
 
     /*
