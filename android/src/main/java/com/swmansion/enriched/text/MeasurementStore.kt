@@ -175,12 +175,8 @@ object MeasurementStore {
     heightMode: YogaMeasureMode?,
     props: ReadableMap?,
   ): Long {
-    val size = getMeasureById(context, width, props)
-    if (heightMode !== YogaMeasureMode.AT_MOST) return size
-
-    val calculatedHeight = YogaMeasureOutput.getHeight(size)
-    val atMostHeight = PixelUtil.toDIPFromPixel(height)
-    val finalHeight = calculatedHeight.coerceAtMost(atMostHeight)
-    return YogaMeasureOutput.make(YogaMeasureOutput.getWidth(size), finalHeight)
+    // Report intrinsic height for read-only text. Clamping AT_MOST clips long
+    // EnrichedText content inside ScrollViews when numberOfLines is unset.
+    return getMeasureById(context, width, props)
   }
 }

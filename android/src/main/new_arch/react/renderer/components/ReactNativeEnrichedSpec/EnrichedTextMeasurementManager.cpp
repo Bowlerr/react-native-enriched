@@ -5,6 +5,8 @@
 #include <react/jni/ReadableNativeMap.h>
 #include <react/renderer/core/conversions.h>
 
+#include <limits>
+
 using namespace facebook::jni;
 
 namespace facebook::react {
@@ -37,7 +39,7 @@ Size EnrichedTextMeasurementManager::measure(
   auto measurement = yogaMeassureToSize(
       measure(fabricUIManager, surfaceId, componentName.get(), nullptr,
               propsRM.get(), nullptr, minimumSize.width, maximumSize.width,
-              minimumSize.height, maximumSize.height));
+              minimumSize.height, std::numeric_limits<Float>::infinity()));
 
   return measurement;
 }
