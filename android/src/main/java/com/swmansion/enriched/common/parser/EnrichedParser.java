@@ -7,6 +7,7 @@ import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.style.AlignmentSpan;
+import android.text.style.LeadingMarginSpan;
 import android.text.style.ParagraphStyle;
 import com.swmansion.enriched.common.EnrichedConstants;
 import com.swmansion.enriched.common.spans.EnrichedBlockQuoteSpan;
@@ -431,6 +432,7 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
   private final ArrayDeque<ListContext> mListStack = new ArrayDeque<>();
   private static Boolean isEmptyTag = false;
   private int mCodeBlockDepth = 0;
+  private int mBlockQuoteDepth = 0;
 
   public HtmlToSpannedConverter(
       String source, T style, Parser parser, EnrichedSpanFactory<T> spanFactory) {
@@ -624,11 +626,16 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       start(mSpannableStringBuilder, new Italic());
     } else if (tag.equalsIgnoreCase("blockquote")) {
       isEmptyTag = true;
+      mBlockQuoteDepth++;
       startBlockquote(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("codeblock")) {
       isEmptyTag = true;
       mCodeBlockDepth++;
-      startCodeBlock(mSpannableStringBuilder, attributes);
+      startCodeBlock(
+          mSpannableStringBuilder,
+          attributes,
+          mBlockQuoteDepth == 0 && mListStack.isEmpty(),
+          mBlockQuoteDepth > 0);
     } else if (tag.equalsIgnoreCase("a")) {
       startA(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("u")) {
@@ -683,6 +690,9 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       end(mSpannableStringBuilder, Italic.class, mSpanFactory.createItalicSpan(mStyle));
     } else if (tag.equalsIgnoreCase("blockquote")) {
       endBlockquote(mSpannableStringBuilder, mStyle, mSpanFactory);
+      if (mBlockQuoteDepth > 0) {
+        mBlockQuoteDepth--;
+      }
     } else if (tag.equalsIgnoreCase("codeblock")) {
       endCodeBlock(mSpannableStringBuilder, mStyle, mSpanFactory);
       if (mCodeBlockDepth > 0) {
@@ -848,14 +858,27 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     setParagraphSpanFromMark(text, last, spanFactory.createBlockQuoteSpan(style));
   }
 
-  private void startCodeBlock(Editable text, Attributes attributes) {
+  private void startCodeBlock(
+      Editable text, Attributes attributes, boolean isRootCodeBlock, boolean isInBlockQuote) {
     startBlockElement(text, attributes);
-    start(text, new CodeBlock());
+    start(text, new CodeBlock(isRootCodeBlock, isInBlockQuote));
   }
 
   private static <T> void endCodeBlock(Editable text, T style, EnrichedSpanFactory<T> spanFactory) {
     endBlockElement(text);
     CodeBlock last = getLast(text, CodeBlock.class);
+    if (last != null && last.mIsRootCodeBlock) {
+      setParagraphSpanFromMark(
+          text, last, spanFactory.createCodeBlockSpan(style), new CodeBlockLeadingMarginSpan(24));
+      return;
+    }
+
+    if (last != null && last.mIsInBlockQuote) {
+      setParagraphSpanFromMark(
+          text, last, spanFactory.createCodeBlockSpan(style), new CodeBlockLeadingMarginSpan(32));
+      return;
+    }
+
     setParagraphSpanFromMark(text, last, spanFactory.createCodeBlockSpan(style));
   }
 
@@ -970,6 +993,10 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
   private static int getSpanFlags(Object span, int baseFlags) {
     if (span instanceof EnrichedBlockQuoteSpan) {
       return baseFlags | (1 << Spanned.SPAN_PRIORITY_SHIFT);
+    }
+
+    if (span instanceof CodeBlockLeadingMarginSpan) {
+      return Spannable.SPAN_INCLUSIVE_EXCLUSIVE;
     }
 
     return baseFlags;
@@ -1129,7 +1156,43 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
 
   private static class Code {}
 
-  private static class CodeBlock {}
+  private static class CodeBlock {
+    private final boolean mIsRootCodeBlock;
+    private final boolean mIsInBlockQuote;
+
+    private CodeBlock(boolean isRootCodeBlock, boolean isInBlockQuote) {
+      mIsRootCodeBlock = isRootCodeBlock;
+      mIsInBlockQuote = isInBlockQuote;
+    }
+  }
+
+  private static class CodeBlockLeadingMarginSpan implements LeadingMarginSpan {
+    private final int mLeadingMargin;
+
+    private CodeBlockLeadingMarginSpan(int leadingMargin) {
+      mLeadingMargin = leadingMargin;
+    }
+
+    @Override
+    public int getLeadingMargin(boolean first) {
+      return mLeadingMargin;
+    }
+
+    @Override
+    public void drawLeadingMargin(
+        android.graphics.Canvas c,
+        android.graphics.Paint p,
+        int x,
+        int dir,
+        int top,
+        int baseline,
+        int bottom,
+        CharSequence text,
+        int start,
+        int end,
+        boolean first,
+        Layout layout) {}
+  }
 
   private static class Strikethrough {}
 

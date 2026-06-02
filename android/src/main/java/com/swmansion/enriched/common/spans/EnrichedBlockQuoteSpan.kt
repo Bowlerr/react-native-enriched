@@ -41,7 +41,11 @@ open class EnrichedBlockQuoteSpan(
     val color = p.color
     p.style = Paint.Style.FILL
     p.color = enrichedStyle.blockquoteBorderColor
-    val stripeX = x + dir * parentListContentIndent(text, start, end) - dir * nestedListContentIndent(text, start, end)
+    val stripeX =
+      x +
+        dir * parentListContentIndent(text, start, end) -
+        dir * nestedListContentIndent(text, start, end) -
+        dir * nestedCodeBlockContentOffset(text, start, end)
     c.drawRect(stripeX.toFloat(), top.toFloat(), stripeX + dir * enrichedStyle.blockquoteStripeWidth.toFloat(), bottom.toFloat(), p)
     p.style = style
     p.color = color
@@ -58,6 +62,28 @@ open class EnrichedBlockQuoteSpan(
     start: Int,
     end: Int,
   ): Int = listContentIndent(text, start, end) { listStart, blockquoteStart -> listStart >= blockquoteStart }
+
+  private fun nestedCodeBlockContentOffset(
+    text: CharSequence?,
+    start: Int,
+    end: Int,
+  ): Int {
+    val spannedText = text as? Spanned ?: return 0
+    val blockquoteStart = spannedText.getSpanStart(this)
+    if (blockquoteStart < 0) {
+      return 0
+    }
+
+    val hasNestedCodeBlock =
+      spannedText
+        .getSpans(start, end, EnrichedCodeBlockSpan::class.java)
+        .any { codeBlockSpan -> spannedText.getSpanStart(codeBlockSpan) >= blockquoteStart }
+    if (!hasNestedCodeBlock) {
+      return 0
+    }
+
+    return BLOCKQUOTE_CODE_BLOCK_LEADING_MARGIN
+  }
 
   private fun listContentIndent(
     text: CharSequence?,
@@ -105,5 +131,9 @@ open class EnrichedBlockQuoteSpan(
     if (color != null) {
       textPaint?.color = color
     }
+  }
+
+  companion object {
+    private const val BLOCKQUOTE_CODE_BLOCK_LEADING_MARGIN = 32
   }
 }

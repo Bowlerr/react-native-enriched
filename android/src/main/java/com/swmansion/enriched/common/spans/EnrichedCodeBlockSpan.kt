@@ -3,6 +3,7 @@ package com.swmansion.enriched.common.spans
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.text.Spanned
@@ -126,15 +127,16 @@ open class EnrichedCodeBlockSpan(
     }
 
     val backgroundLeft = codeBlockBackgroundLeft(text, start, end, left, right)
+    val fontMetrics = p.fontMetricsInt
     val backgroundTop =
       if (isFirstLineOfSpan) {
-        top + CODE_BLOCK_VERTICAL_MARGIN
+        baseline + fontMetrics.ascent - CODE_BLOCK_VERTICAL_PADDING
       } else {
         top
       }
     val backgroundBottom =
       if (isLastLineOfSpan) {
-        bottom - CODE_BLOCK_VERTICAL_MARGIN
+        tightLineBottom(p, text, start, end, baseline)
       } else {
         bottom
       }
@@ -159,15 +161,46 @@ open class EnrichedCodeBlockSpan(
     left: Int,
     right: Int,
   ): Float {
-    val blockInset =
-      parentBlockQuoteContentIndent(text, start, end) + parentListContentIndent(text, start, end)
+    val blockQuoteInset = parentBlockQuoteContentIndent(text, start, end)
+    val blockInset = blockQuoteInset + parentListContentIndent(text, start, end)
     val maxLeft = (right - 1).coerceAtLeast(left)
     if (blockInset <= 0) {
       return (left - CODE_BLOCK_HORIZONTAL_PADDING).coerceIn(0, maxLeft).toFloat()
     }
 
-    val insetLeft = left + blockInset - CODE_BLOCK_HORIZONTAL_PADDING * 2
+    val blockQuoteCodeBlockGap =
+      if (blockQuoteInset > 0) {
+        BLOCKQUOTE_CODE_BLOCK_BACKGROUND_GAP
+      } else {
+        0
+      }
+    val insetLeft = left + blockInset - CODE_BLOCK_HORIZONTAL_PADDING * 2 + blockQuoteCodeBlockGap
     return insetLeft.coerceIn(0, maxLeft).toFloat()
+  }
+
+  private fun tightLineBottom(
+    paint: Paint,
+    text: CharSequence,
+    start: Int,
+    end: Int,
+    baseline: Int,
+  ): Int {
+    val lineEnd =
+      if (end > start && text[end - 1] == '\n') {
+        end - 1
+      } else {
+        end
+      }
+    if (lineEnd <= start) {
+      return baseline + paint.fontMetricsInt.descent + CODE_BLOCK_LAST_LINE_BOTTOM_PADDING
+    }
+
+    val bounds = Rect()
+    val measuringPaint = Paint(paint)
+    measuringPaint.typeface = Typeface.MONOSPACE
+    val lineText = text.subSequence(start, lineEnd).toString()
+    measuringPaint.getTextBounds(lineText, 0, lineText.length, bounds)
+    return baseline + bounds.bottom + CODE_BLOCK_LAST_LINE_BOTTOM_PADDING
   }
 
   private fun parentBlockQuoteContentIndent(
@@ -238,7 +271,9 @@ open class EnrichedCodeBlockSpan(
 
   companion object {
     private const val CODE_BLOCK_HORIZONTAL_PADDING = 12
-    private const val CODE_BLOCK_VERTICAL_MARGIN = 3
-    private const val CODE_BLOCK_VERTICAL_PADDING = 6
+    private const val CODE_BLOCK_VERTICAL_MARGIN = 8
+    private const val CODE_BLOCK_VERTICAL_PADDING = 8
+    private const val CODE_BLOCK_LAST_LINE_BOTTOM_PADDING = 20
+    private const val BLOCKQUOTE_CODE_BLOCK_BACKGROUND_GAP = 24
   }
 }
