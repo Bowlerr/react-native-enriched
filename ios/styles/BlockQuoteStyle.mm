@@ -140,6 +140,7 @@ static NSString *EnrichedBlockQuoteMarker(NSParagraphStyle *pStyle) {
                     blockquoteIndentUnit * (quoteLevel + 1);
                 CGFloat listIndent = 0.0;
                 BOOL hasNestedLayoutMarker = NO;
+                BOOL isCodeBlockParagraph = NO;
                 for (NSTextList *textList in pStyle.textLists) {
                   NSString *markerFormat = textList.markerFormat;
                   NSInteger unorderedLevel = EnrichedBlockQuoteListLevel(
@@ -177,6 +178,7 @@ static NSString *EnrichedBlockQuoteMarker(NSParagraphStyle *pStyle) {
 
                   if ([markerFormat isEqualToString:@"EnrichedCodeBlock"]) {
                     hasNestedLayoutMarker = YES;
+                    isCodeBlockParagraph = YES;
                     listIndent = MAX(listIndent, codeBlockIndent);
                   }
                 }
@@ -187,13 +189,27 @@ static NSString *EnrichedBlockQuoteMarker(NSParagraphStyle *pStyle) {
                 pStyle.firstLineHeadIndent = indent;
                 if (!hasNestedLayoutMarker) {
                   pStyle.paragraphSpacingBefore =
-                      MAX(pStyle.paragraphSpacingBefore, 4.0);
-                  pStyle.paragraphSpacing = MAX(pStyle.paragraphSpacing, 6.0);
+                      MAX(pStyle.paragraphSpacingBefore, 12.0);
+                  pStyle.paragraphSpacing = MAX(pStyle.paragraphSpacing, 12.0);
                 }
                 [self.host.textView.textStorage
                     addAttribute:NSParagraphStyleAttributeName
                            value:pStyle
                            range:subRange];
+                if (!isCodeBlockParagraph) {
+                  [self.host.textView.textStorage
+                      addAttribute:NSForegroundColorAttributeName
+                             value:[self.host.config blockquoteColor]
+                             range:subRange];
+                  [self.host.textView.textStorage
+                      addAttribute:NSUnderlineColorAttributeName
+                             value:[self.host.config blockquoteColor]
+                             range:subRange];
+                  [self.host.textView.textStorage
+                      addAttribute:NSStrikethroughColorAttributeName
+                             value:[self.host.config blockquoteColor]
+                             range:subRange];
+                }
               }];
 }
 

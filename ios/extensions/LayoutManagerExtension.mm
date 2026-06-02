@@ -1059,7 +1059,7 @@ static CGRect EnrichedInlineBackgroundRect(CGRect glyphRect, CGRect lineRect,
 
   flushAllRails();
 
-  CGFloat desiredVerticalPadding = 6.0;
+  CGFloat desiredVerticalPadding = 0.0;
   for (NSDictionary *quoteSegment in quoteRailSegments) {
     CGRect quoteRect = [quoteSegment[@"rect"] CGRectValue];
     CGFloat railX = [quoteSegment[@"x"] doubleValue];
