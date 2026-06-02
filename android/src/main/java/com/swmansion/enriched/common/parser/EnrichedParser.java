@@ -469,7 +469,11 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
         // TODO: verify if Spannable.SPAN_EXCLUSIVE_EXCLUSIVE does not break anything.
         // Previously it was SPAN_PARAGRAPH. I've changed that in order to fix ranges for list
         // items.
-        mSpannableStringBuilder.setSpan(obj[i], start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        int flags =
+            obj[i] instanceof EnrichedBlockSpan || obj[i] instanceof AlignmentSpan
+                ? Spannable.SPAN_INCLUSIVE_EXCLUSIVE
+                : Spannable.SPAN_EXCLUSIVE_EXCLUSIVE;
+        mSpannableStringBuilder.setSpan(obj[i], start, end, flags);
       }
     }
 
