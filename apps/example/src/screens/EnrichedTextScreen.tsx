@@ -9,6 +9,11 @@ import {
 import { Button } from '../components/Button';
 import { ValueModal } from '../components/ValueModal';
 import { enrichedTextHtmlStyle } from '../constants/editorConfig';
+import { STRESS_TEST_HTML } from '../constants/stressTestHtml';
+import {
+  TEXT_VIEWER_HTML_EXAMPLES,
+  type TextViewerExample,
+} from '../constants/textViewerExamples';
 
 type EllipsizeMode = EnrichedTextProps['ellipsizeMode'];
 
@@ -19,21 +24,34 @@ interface EnrichedTextScreenProps {
 export function EnrichedTextScreen({ onSwitch }: EnrichedTextScreenProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [html, setHtml] = useState<string | null>(null);
+  const [activeExampleKey, setActiveExampleKey] = useState<string | null>(null);
+  const [rendererRevision, setRendererRevision] = useState(0);
   const [ellipsizeMode, setEllipsizeMode] = useState<EllipsizeMode>('tail');
   const [numberOfLines, setNumberOfLines] = useState<number>(0);
 
-  const handleSubmit = (value: string) => {
+  const applyHtml = (value: string, exampleKey: string | null) => {
     setHtml(value);
+    setActiveExampleKey(exampleKey);
+    setRendererRevision((revision) => revision + 1);
+  };
+
+  const handleSubmit = (value: string) => {
+    applyHtml(value, null);
     setIsModalOpen(false);
   };
 
+  const setExample = (example: TextViewerExample) => {
+    applyHtml(example.html, example.key);
+  };
+
   const handleLinkPress = (e: OnLinkPressEvent) => {
-    setHtml(`You pressed the link: ${e.url}`);
+    applyHtml(`You pressed the link: ${e.url}`, null);
   };
 
   const handleMentionPress = (e: OnMentionPressEvent) => {
-    setHtml(
-      `You pressed the mention: text: ${e.text}, type: ${e.indicator}, attributes: ${JSON.stringify(e.attributes)}`
+    applyHtml(
+      `You pressed the mention: text: ${e.text}, type: ${e.indicator}, attributes: ${JSON.stringify(e.attributes)}`,
+      null
     );
   };
 
@@ -57,6 +75,35 @@ export function EnrichedTextScreen({ onSwitch }: EnrichedTextScreenProps) {
             testID="set-enriched-text-button"
           />
         </View>
+        <View style={styles.buttonRow}>
+          <Button
+            title="Set Example"
+            onPress={() => {
+              applyHtml(STRESS_TEST_HTML, 'full-stress');
+            }}
+            style={styles.rowButton}
+            testID="set-enriched-text-example-button"
+          />
+        </View>
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle} testID="viewer-example-current">
+            example:{' '}
+            {TEXT_VIEWER_HTML_EXAMPLES.find(
+              (example) => example.key === activeExampleKey
+            )?.title ?? 'custom'}
+          </Text>
+          <View style={styles.exampleGrid}>
+            {TEXT_VIEWER_HTML_EXAMPLES.map((example) => (
+              <Button
+                key={example.key}
+                title={example.title}
+                onPress={() => setExample(example)}
+                style={styles.exampleButton}
+                testID={`text-viewer-example-${example.key}-button`}
+              />
+            ))}
+          </View>
+        </View>
         <View style={styles.sectionContainer}>
           <Text style={styles.sectionTitle} testID="ellipsize-current-mode">
             ellipsizeMode: {ellipsizeMode}
@@ -79,6 +126,12 @@ export function EnrichedTextScreen({ onSwitch }: EnrichedTextScreenProps) {
               onPress={() => setEllipsizeMode('tail')}
               style={styles.rowButton}
               testID="ellipsize-tail-button"
+            />
+            <Button
+              title="Clip"
+              onPress={() => setEllipsizeMode('clip')}
+              style={styles.rowButton}
+              testID="ellipsize-clip-button"
             />
           </View>
         </View>
@@ -110,6 +163,7 @@ export function EnrichedTextScreen({ onSwitch }: EnrichedTextScreenProps) {
         {html !== null && (
           <View style={styles.rendererContainer} testID="enriched-text">
             <EnrichedText
+              key={rendererRevision}
               style={styles.text}
               htmlStyle={enrichedTextHtmlStyle}
               numberOfLines={numberOfLines}
@@ -161,6 +215,18 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     color: 'black',
+  },
+  exampleGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  exampleButton: {
+    flexBasis: '48%',
+    flexGrow: 1,
+    marginTop: 0,
+    minHeight: 56,
   },
   rowButton: {
     flex: 1,

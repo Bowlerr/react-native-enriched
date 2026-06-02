@@ -86,6 +86,14 @@ const STYLE_ITEMS = [
     icon: 'check-square-o',
   },
   {
+    name: 'decrease-list-level',
+    icon: 'outdent',
+  },
+  {
+    name: 'increase-list-level',
+    icon: 'indent',
+  },
+  {
     name: 'align-left',
     icon: 'align-left',
   },
@@ -171,6 +179,12 @@ export const Toolbar: FC<ToolbarProps> = ({
         // Make checkbox checked by default
         editorRef.current?.toggleCheckboxList(true);
         break;
+      case 'increase-list-level':
+        editorRef.current?.increaseListLevel();
+        break;
+      case 'decrease-list-level':
+        editorRef.current?.decreaseListLevel();
+        break;
       case 'link':
         onOpenLinkModal();
         break;
@@ -232,6 +246,14 @@ export const Toolbar: FC<ToolbarProps> = ({
         return stylesState.mention.isBlocking;
       case 'checkbox-list':
         return stylesState.checkboxList.isBlocking;
+      case 'increase-list-level':
+      case 'decrease-list-level':
+        return (
+          !stylesState.unorderedList.isActive &&
+          !stylesState.orderedList.isActive &&
+          !stylesState.checkboxList.isActive &&
+          !stylesState.blockQuote.isActive
+        );
       default:
         return false;
     }

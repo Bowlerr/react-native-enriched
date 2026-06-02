@@ -60,12 +60,9 @@ export function useEditorState() {
     selection.start >= currentLink.start &&
     selection.end <= currentLink.end;
 
-  const handleChangeText = (e: OnChangeTextEvent) => {
-    console.log('Text changed:', e.value);
-  };
+  const handleChangeText = (_e: OnChangeTextEvent) => {};
 
   const handleChangeHtml = (e: OnChangeHtmlEvent) => {
-    console.log('HTML changed:', e.value);
     setCurrentHtml(e.value);
   };
 
@@ -147,20 +144,13 @@ export function useEditorState() {
     });
   };
 
-  const handleFocusEvent = () => {
-    console.log('Input focused');
-  };
+  const handleFocusEvent = () => {};
 
-  const handleBlurEvent = () => {
-    console.log('Input blurred');
-  };
+  const handleBlurEvent = () => {};
 
-  const handleKeyPress = (e: OnKeyPressEvent) => {
-    console.log('Key pressed:', e.key);
-  };
+  const handleKeyPress = (_e: OnKeyPressEvent) => {};
 
   const handleLinkDetected = (state: CurrentLinkState) => {
-    console.log(state);
     setCurrentLink(state);
   };
 
@@ -169,7 +159,6 @@ export function useEditorState() {
   };
 
   const handlePasteImagesEvent = (e: OnPasteImagesEvent) => {
-    console.log('Pasted images:', e.images);
     e.images.forEach((image) => {
       const { finalWidth, finalHeight } = prepareImageDimensions(
         image.width,
@@ -196,6 +185,10 @@ export function useEditorState() {
   const submitSetValue = (value: string) => {
     ref.current?.setValue(value);
     closeValueModal();
+  };
+
+  const setValue = (value: string) => {
+    ref.current?.setValue(value);
   };
 
   const selectImage = async (
@@ -233,9 +226,7 @@ export function useEditorState() {
     }
   };
 
-  const handleSubmitEditingEvent = (e: OnSubmitEditing) => {
-    console.log('Submitted editing:', e.text);
-  };
+  const handleSubmitEditingEvent = (_e: OnSubmitEditing) => {};
 
   return {
     ref,
@@ -277,6 +268,7 @@ export function useEditorState() {
     handleSubmitEditingEvent,
     submitLink,
     submitSetValue,
+    setValue,
     selectImage,
   };
 }

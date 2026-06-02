@@ -13,6 +13,7 @@ import {
   htmlStyle,
   ANDROID_EXPERIMENTAL_SYNCHRONOUS_EVENTS,
 } from '../constants/editorConfig';
+import { STRESS_TEST_HTML } from '../constants/stressTestHtml';
 
 interface TestScreenProps {
   onSwitch: () => void;
@@ -78,7 +79,6 @@ export function TestScreen({
             onChangeHtml={(e) => editor.handleChangeHtml(e.nativeEvent)}
             onChangeState={(e) => editor.handleChangeState(e.nativeEvent)}
             onLinkDetected={editor.handleLinkDetected}
-            onMentionDetected={console.log}
             onStartMention={editor.handleStartMention}
             onChangeMention={editor.handleChangeMention}
             onEndMention={editor.handleEndMention}
@@ -113,6 +113,14 @@ export function TestScreen({
             style={styles.rowButton}
             testID="set-value-button"
           />
+          <Button
+            title="Set Example"
+            onPress={() => editor.setValue(STRESS_TEST_HTML)}
+            style={styles.rowButton}
+            testID="set-example-value-button"
+          />
+        </View>
+        <View style={styles.buttonRow}>
           <Button
             title="Dev Screen"
             onPress={onSwitch}
