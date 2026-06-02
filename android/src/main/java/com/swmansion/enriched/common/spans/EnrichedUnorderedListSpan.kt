@@ -3,7 +3,6 @@ package com.swmansion.enriched.common.spans
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.text.Layout
-import android.text.Spanned
 import android.text.TextPaint
 import android.text.style.LeadingMarginSpan
 import android.text.style.MetricAffectingSpan
@@ -41,9 +40,7 @@ open class EnrichedUnorderedListSpan(
     first: Boolean,
     layout: Layout?,
   ) {
-    val spannedText = text as Spanned
-
-    if (spannedText.getSpanStart(this) == start) {
+    if (shouldDrawListMarker(text, start, end, first)) {
       val style = paint.style
       val oldColor = paint.color
       paint.color = enrichedStyle.ulBulletColor
@@ -52,7 +49,8 @@ open class EnrichedUnorderedListSpan(
       val bulletRadius = enrichedStyle.ulBulletSize / 2f
       val fm = paint.fontMetricsInt
       val yPosition = baseline + (fm.ascent + fm.descent) / 2f
-      val xPosition = x + dir * (bulletRadius + listMargin())
+      val continuationOffset = blockquoteContinuationOffset(text, start, end)
+      val xPosition = x + dir * (bulletRadius + listMargin() - continuationOffset)
 
       canvas.drawCircle(xPosition, yPosition, bulletRadius, paint)
 
@@ -60,6 +58,17 @@ open class EnrichedUnorderedListSpan(
       paint.style = style
     }
   }
+
+  private fun blockquoteContinuationOffset(
+    text: CharSequence,
+    start: Int,
+    end: Int,
+  ): Int =
+    if (isBlockQuoteContinuationMarker(text, start, end)) {
+      enrichedStyle.blockquoteStripeWidth + enrichedStyle.blockquoteGapWidth
+    } else {
+      0
+    }
 
   private fun listMargin(): Int = enrichedStyle.ulMarginLeft * (level.coerceAtLeast(0) + 1)
 }

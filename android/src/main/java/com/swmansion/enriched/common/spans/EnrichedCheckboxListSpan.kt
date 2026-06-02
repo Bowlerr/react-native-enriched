@@ -3,7 +3,6 @@ package com.swmansion.enriched.common.spans
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.text.Layout
-import android.text.Spanned
 import android.text.TextPaint
 import android.text.style.LeadingMarginSpan
 import android.text.style.LineHeightSpan
@@ -74,20 +73,30 @@ open class EnrichedCheckboxListSpan(
     first: Boolean,
     layout: Layout?,
   ) {
-    val spannedText = text as Spanned
-
-    if (spannedText.getSpanStart(this) == start) {
+    if (shouldDrawListMarker(text, start, end, first)) {
       checkboxDrawable.update(isChecked)
 
       val fm = paint.fontMetricsInt
       val textCenter = baseline + (fm.ascent + fm.descent) / 2f
       val drawableTop = textCenter - (enrichedStyle.ulCheckboxBoxSize / 2f)
+      val continuationOffset = blockquoteContinuationOffset(text, start, end)
 
-      canvas.withTranslation(x.toFloat() + listMargin(), drawableTop) {
+      canvas.withTranslation(x.toFloat() + listMargin() - continuationOffset, drawableTop) {
         checkboxDrawable.draw(this)
       }
     }
   }
+
+  private fun blockquoteContinuationOffset(
+    text: CharSequence,
+    start: Int,
+    end: Int,
+  ): Int =
+    if (isBlockQuoteContinuationMarker(text, start, end)) {
+      enrichedStyle.blockquoteStripeWidth + enrichedStyle.blockquoteGapWidth
+    } else {
+      0
+    }
 
   private fun listMargin(): Int = enrichedStyle.ulCheckboxMarginLeft * (level.coerceAtLeast(0) + 1)
 }

@@ -5,7 +5,6 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Build
 import android.text.Layout
-import android.text.Spanned
 import android.text.TextPaint
 import android.text.style.LeadingMarginSpan
 import android.text.style.MetricAffectingSpan
@@ -43,14 +42,13 @@ open class EnrichedOrderedListSpan(
     first: Boolean,
     layout: Layout?,
   ) {
-    val spannedText = t as? Spanned ?: return
-
-    if (first && spannedText.getSpanStart(this) == start) {
+    if (shouldDrawListMarker(t, start, end, first)) {
       val text = "$index."
       val width = paint.measureText(text)
 
       val yPosition = baseline.toFloat()
-      val xPosition = x + dir * (listMargin() - width / 2)
+      val continuationOffset = blockquoteContinuationOffset(t, start, end)
+      val xPosition = x + dir * (listMargin() - continuationOffset - width / 2)
 
       val originalColor = paint.color
       val originalTypeface = paint.typeface
@@ -79,6 +77,17 @@ open class EnrichedOrderedListSpan(
       } else {
         Typeface.create(originalTypeface, Typeface.NORMAL)
       }
+    }
+
+  private fun blockquoteContinuationOffset(
+    text: CharSequence?,
+    start: Int,
+    end: Int,
+  ): Int =
+    if (isBlockQuoteContinuationMarker(text, start, end)) {
+      enrichedStyle.blockquoteStripeWidth + enrichedStyle.blockquoteGapWidth
+    } else {
+      0
     }
 
   private fun listMargin(): Int = enrichedStyle.olMarginLeft * (level.coerceAtLeast(0) + 1)

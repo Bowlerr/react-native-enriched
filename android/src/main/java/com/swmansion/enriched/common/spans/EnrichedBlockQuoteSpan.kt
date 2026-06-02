@@ -41,17 +41,29 @@ open class EnrichedBlockQuoteSpan(
     val color = p.color
     p.style = Paint.Style.FILL
     p.color = enrichedStyle.blockquoteBorderColor
-    val stripeX = x - dir * nestedListLeadingMargin(text, start, end, first)
+    val stripeX = x + dir * parentListContentIndent(text, start, end) - dir * nestedListContentIndent(text, start, end)
     c.drawRect(stripeX.toFloat(), top.toFloat(), stripeX + dir * enrichedStyle.blockquoteStripeWidth.toFloat(), bottom.toFloat(), p)
     p.style = style
     p.color = color
   }
 
-  private fun nestedListLeadingMargin(
+  private fun parentListContentIndent(
     text: CharSequence?,
     start: Int,
     end: Int,
-    first: Boolean,
+  ): Int = listContentIndent(text, start, end) { listStart, blockquoteStart -> listStart < blockquoteStart }
+
+  private fun nestedListContentIndent(
+    text: CharSequence?,
+    start: Int,
+    end: Int,
+  ): Int = listContentIndent(text, start, end) { listStart, blockquoteStart -> listStart >= blockquoteStart }
+
+  private fun listContentIndent(
+    text: CharSequence?,
+    start: Int,
+    end: Int,
+    matchesListPosition: (listStart: Int, blockquoteStart: Int) -> Boolean,
   ): Int {
     val spannedText = text as? Spanned ?: return 0
     val blockquoteStart = spannedText.getSpanStart(this)
@@ -61,8 +73,31 @@ open class EnrichedBlockQuoteSpan(
 
     return spannedText
       .getSpans(start, end, EnrichedListSpan::class.java)
-      .filter { listSpan -> spannedText.getSpanStart(listSpan) >= blockquoteStart }
-      .sumOf { listSpan -> (listSpan as? LeadingMarginSpan)?.getLeadingMargin(first) ?: 0 }
+      .filter { listSpan -> matchesListPosition(spannedText.getSpanStart(listSpan), blockquoteStart) }
+      .maxOfOrNull { listSpan -> listContentIndent(listSpan) }
+      ?: 0
+  }
+
+  private fun listContentIndent(listSpan: EnrichedListSpan): Int {
+    val level = listSpan.level.coerceAtLeast(0) + 1
+    return when (listSpan) {
+      is EnrichedCheckboxListSpan -> {
+        enrichedStyle.ulCheckboxMarginLeft * level + enrichedStyle.ulCheckboxGapWidth +
+          enrichedStyle.ulCheckboxBoxSize
+      }
+
+      is EnrichedOrderedListSpan -> {
+        enrichedStyle.olMarginLeft * level + enrichedStyle.olGapWidth
+      }
+
+      is EnrichedUnorderedListSpan -> {
+        enrichedStyle.ulMarginLeft * level + enrichedStyle.ulGapWidth
+      }
+
+      else -> {
+        (listSpan as? LeadingMarginSpan)?.getLeadingMargin(true) ?: 0
+      }
+    }
   }
 
   override fun updateDrawState(textPaint: TextPaint?) {
