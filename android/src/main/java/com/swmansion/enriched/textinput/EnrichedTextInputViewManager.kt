@@ -273,6 +273,48 @@ class EnrichedTextInputViewManager :
     view?.shouldEmitOnChangeText = value
   }
 
+  override fun setIsOnChangeStateSet(
+    view: EnrichedTextInputView?,
+    value: Boolean,
+  ) {
+    view?.shouldEmitOnChangeState = value
+  }
+
+  override fun setIsOnChangeSelectionSet(
+    view: EnrichedTextInputView?,
+    value: Boolean,
+  ) {
+    view?.shouldEmitOnChangeSelection = value
+  }
+
+  override fun setIsOnInputKeyPressSet(
+    view: EnrichedTextInputView?,
+    value: Boolean,
+  ) {
+    view?.shouldEmitOnInputKeyPress = value
+  }
+
+  override fun setIsOnLinkDetectedSet(
+    view: EnrichedTextInputView?,
+    value: Boolean,
+  ) {
+    view?.shouldEmitOnLinkDetected = value
+  }
+
+  override fun setIsOnMentionDetectedSet(
+    view: EnrichedTextInputView?,
+    value: Boolean,
+  ) {
+    view?.shouldEmitOnMentionDetected = value
+  }
+
+  override fun setIsOnMentionSet(
+    view: EnrichedTextInputView?,
+    value: Boolean,
+  ) {
+    view?.shouldEmitOnMention = value
+  }
+
   override fun setAutoCapitalize(
     view: EnrichedTextInputView?,
     flag: String?,

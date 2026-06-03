@@ -23,6 +23,15 @@ class EnrichedSelection(
   private var previousLinkDetectedEvent: MutableMap<String, String> = mutableMapOf("text" to "", "url" to "")
   private var previousMentionDetectedEvent: MutableMap<String, String> = mutableMapOf("text" to "", "payload" to "")
 
+  fun setSelectionSilently(
+    selStart: Int,
+    selEnd: Int,
+  ) {
+    val textLength = view.text?.length ?: 0
+    start = selStart.coerceAtMost(selEnd).coerceAtLeast(0).coerceAtMost(textLength)
+    end = selEnd.coerceAtLeast(selStart).coerceAtLeast(0).coerceAtMost(textLength)
+  }
+
   fun onSelection(
     selStart: Int,
     selEnd: Int,
@@ -227,6 +236,7 @@ class EnrichedSelection(
     start: Int,
     end: Int,
   ) {
+    if (!view.shouldEmitOnChangeSelection) return
     if (editable == null) return
 
     val context = view.context as ReactContext
@@ -254,6 +264,8 @@ class EnrichedSelection(
     start: Int,
     end: Int,
   ) {
+    if (!view.shouldEmitOnLinkDetected) return
+
     val text = spannable.substring(start, end).replace(EnrichedConstants.ZWS_STRING, "")
     val url = span?.getUrl() ?: ""
 
@@ -288,6 +300,8 @@ class EnrichedSelection(
     start: Int,
     end: Int,
   ) {
+    if (!view.shouldEmitOnMentionDetected) return
+
     val text = spannable.substring(start, end)
     val attributes = span?.getAttributes() ?: emptyMap()
     val indicator = span?.getIndicator() ?: ""

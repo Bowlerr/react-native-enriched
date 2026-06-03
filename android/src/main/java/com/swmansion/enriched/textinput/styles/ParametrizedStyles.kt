@@ -188,6 +188,8 @@ class ParametrizedStyles(
     return TextRange(result, start, end)
   }
 
+  private fun getMentionIndicator(text: String): String? = mentionIndicators.firstOrNull { indicator -> text.startsWith(indicator) }
+
   // After editing text we want to automatically detect links in the affected range
   // Affected range is range + previous word + next word
   private fun getLinksAffectedRange(
@@ -247,16 +249,13 @@ class ParametrizedStyles(
     val currentWord = getWordAtIndex(s, endCursorPosition) ?: return
     val spannable = view.text as Spannable
 
-    val indicatorsPattern = mentionIndicators.joinToString("|") { Regex.escape(it) }
-    val mentionIndicatorRegex = Regex("^($indicatorsPattern)")
-    val mentionRegex = Regex("^($indicatorsPattern)\\S*")
-
     var indicator: String
     var finalStart: Int
     val finalEnd = currentWord.end
+    val currentIndicator = getMentionIndicator(currentWord.text)
 
     // No mention in the current word, check previous one
-    if (!mentionRegex.matches(currentWord.text)) {
+    if (currentIndicator == null) {
       val previousWord = getWordAtIndex(spannable, currentWord.start - 1)
 
       // No previous word -> no mention to be detected
@@ -266,18 +265,19 @@ class ParametrizedStyles(
       }
 
       // Previous word is not a mention -> end mention
-      if (!mentionRegex.matches(previousWord.text)) {
+      val previousIndicator = getMentionIndicator(previousWord.text)
+      if (previousIndicator == null) {
         mentionHandler.endMention()
         return
       }
 
       // Previous word is a mention -> use it
       finalStart = previousWord.start
-      indicator = mentionIndicatorRegex.find(previousWord.text)?.value ?: ""
+      indicator = previousIndicator
     } else {
       // Current word is a mention -> use it
       finalStart = currentWord.start
-      indicator = mentionIndicatorRegex.find(currentWord.text)?.value ?: ""
+      indicator = currentIndicator
     }
 
     // Mirror iOS conflicting-styles behaviour: check the full candidate range for

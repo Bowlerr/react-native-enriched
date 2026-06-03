@@ -7,6 +7,7 @@ import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Color
 import android.graphics.Rect
+import android.graphics.drawable.ColorDrawable
 import android.graphics.text.LineBreaker
 import android.os.Build
 import android.text.InputType
@@ -22,6 +23,7 @@ import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
@@ -73,6 +75,7 @@ import com.swmansion.enriched.textinput.watchers.EnrichedSpanWatcher
 import com.swmansion.enriched.textinput.watchers.EnrichedTextWatcher
 import java.util.regex.Pattern
 import java.util.regex.PatternSyntaxException
+import kotlin.math.abs
 import kotlin.math.ceil
 
 class EnrichedTextInputView :
@@ -105,6 +108,12 @@ class EnrichedTextInputView :
 
   var shouldEmitHtml: Boolean = false
   var shouldEmitOnChangeText: Boolean = false
+  var shouldEmitOnChangeState: Boolean = false
+  var shouldEmitOnChangeSelection: Boolean = false
+  var shouldEmitOnInputKeyPress: Boolean = false
+  var shouldEmitOnLinkDetected: Boolean = false
+  var shouldEmitOnMentionDetected: Boolean = false
+  var shouldEmitOnMention: Boolean = false
   var experimentalSynchronousEvents: Boolean = false
   var useHtmlNormalizer: Boolean = false
 
@@ -115,6 +124,9 @@ class EnrichedTextInputView :
   private var typefaceDirty = false
   private var didAttachToWindow = false
   private var detectScrollMovement = false
+  private var isUserDragScrolling = false
+  private var touchStartX = 0f
+  private var touchStartY = 0f
   private var fontFamily: String? = null
   private var fontStyle: Int = ReactConstants.UNSET
   private var fontWeight: Int = ReactConstants.UNSET
@@ -122,6 +134,11 @@ class EnrichedTextInputView :
   private var defaultValueDirty: Boolean = false
 
   private var inputMethodManager: InputMethodManager? = null
+  private val touchSlop by lazy { ViewConfiguration.get(context).scaledTouchSlop }
+  private val restoreCursorFollowRunnable =
+    Runnable {
+      isUserDragScrolling = false
+    }
   private val spannableFactory = EnrichedTextInputSpannableFactory()
   private var contextMenuItems: List<Pair<Int, String>> = emptyList()
 
@@ -181,11 +198,15 @@ class EnrichedTextInputView :
     isSingleLine = false
     isHorizontalScrollBarEnabled = false
     isVerticalScrollBarEnabled = true
+    verticalScrollbarPosition = SCROLLBAR_POSITION_RIGHT
     gravity = Gravity.TOP or Gravity.START
     inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       breakStrategy = LineBreaker.BREAK_STRATEGY_HIGH_QUALITY
+      verticalScrollbarThumbDrawable = ColorDrawable(Color.argb(110, 0, 0, 0))
+      verticalScrollbarTrackDrawable = ColorDrawable(Color.TRANSPARENT)
+      isScrollbarFadingEnabled = false
     }
 
     setPadding(0, 0, 0, 0)
@@ -251,15 +272,26 @@ class EnrichedTextInputView :
 
   // https://github.com/facebook/react-native/blob/36df97f500aa0aa8031098caf7526db358b6ddc1/packages/react-native/ReactAndroid/src/main/java/com/facebook/react/views/textinput/ReactEditText.kt#L295C1-L296C1
   override fun onTouchEvent(ev: MotionEvent): Boolean {
-    when (ev.action) {
+    when (ev.actionMasked) {
       MotionEvent.ACTION_DOWN -> {
         detectScrollMovement = true
+        isUserDragScrolling = false
+        touchStartX = ev.x
+        touchStartY = ev.y
+        removeCallbacks(restoreCursorFollowRunnable)
+
         // Disallow parent views to intercept touch events, until we can detect if we should be
         // capturing these touches or not.
         this.parent.requestDisallowInterceptTouchEvent(true)
       }
 
       MotionEvent.ACTION_MOVE -> {
+        if (!isUserDragScrolling &&
+          (abs(ev.x - touchStartX) > touchSlop || abs(ev.y - touchStartY) > touchSlop)
+        ) {
+          isUserDragScrolling = true
+        }
+
         if (detectScrollMovement) {
           if (!canScrollVertically(-1) &&
             !canScrollVertically(1) &&
@@ -272,9 +304,20 @@ class EnrichedTextInputView :
           detectScrollMovement = false
         }
       }
+
+      MotionEvent.ACTION_UP,
+      MotionEvent.ACTION_CANCEL,
+      -> {
+        postDelayed(restoreCursorFollowRunnable, CURSOR_FOLLOW_RESTORE_DELAY_MS)
+      }
     }
 
     return super.onTouchEvent(ev)
+  }
+
+  override fun bringPointIntoView(offset: Int): Boolean {
+    if (isUserDragScrolling) return false
+    return super.bringPointIntoView(offset)
   }
 
   override fun canScrollVertically(direction: Int): Boolean = scrollEnabled
@@ -1093,9 +1136,16 @@ class EnrichedTextInputView :
     didAttachToWindow = true
   }
 
+  override fun onDetachedFromWindow() {
+    spanWatcher?.cancelPendingHtmlEvent()
+    layoutManager.cancelPendingLayoutInvalidation()
+    super.onDetachedFromWindow()
+  }
+
   companion object {
     const val TAG = "EnrichedTextInputView"
     private const val CONTEXT_MENU_ITEM_ID = 10000
+    private const val CURSOR_FOLLOW_RESTORE_DELAY_MS = 250L
     const val DEFAULT_IME_ACTION_LABEL = "DONE"
   }
 }

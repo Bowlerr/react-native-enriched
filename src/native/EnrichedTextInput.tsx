@@ -352,6 +352,16 @@ export const EnrichedTextInput = ({
       onChangeHtml={onChangeHtml}
       isOnChangeHtmlSet={onChangeHtml !== undefined}
       isOnChangeTextSet={onChangeText !== undefined}
+      isOnChangeStateSet={onChangeState !== undefined}
+      isOnChangeSelectionSet={onChangeSelection !== undefined}
+      isOnInputKeyPressSet={onKeyPress !== undefined}
+      isOnLinkDetectedSet={onLinkDetected !== undefined}
+      isOnMentionDetectedSet={onMentionDetected !== undefined}
+      isOnMentionSet={
+        onStartMention !== undefined ||
+        onChangeMention !== undefined ||
+        onEndMention !== undefined
+      }
       onChangeState={onChangeState}
       onLinkDetected={handleLinkDetected}
       onMentionDetected={handleMentionDetected}

@@ -53,100 +53,54 @@ class EnrichedSpanState(
   var mentionStart: Int? = null
     private set
 
-  fun setBoldStart(start: Int?) {
-    this.boldStart = start
+  private fun setStartIfChanged(
+    currentStart: Int?,
+    nextStart: Int?,
+    assignStart: (Int?) -> Unit,
+  ) {
+    if (currentStart == nextStart) return
+
+    assignStart(nextStart)
     emitStateChangeEvent()
   }
 
-  fun setItalicStart(start: Int?) {
-    this.italicStart = start
-    emitStateChangeEvent()
-  }
+  fun setBoldStart(start: Int?) = setStartIfChanged(boldStart, start) { boldStart = it }
 
-  fun setUnderlineStart(start: Int?) {
-    this.underlineStart = start
-    emitStateChangeEvent()
-  }
+  fun setItalicStart(start: Int?) = setStartIfChanged(italicStart, start) { italicStart = it }
 
-  fun setStrikethroughStart(start: Int?) {
-    this.strikethroughStart = start
-    emitStateChangeEvent()
-  }
+  fun setUnderlineStart(start: Int?) = setStartIfChanged(underlineStart, start) { underlineStart = it }
 
-  fun setInlineCodeStart(start: Int?) {
-    this.inlineCodeStart = start
-    emitStateChangeEvent()
-  }
+  fun setStrikethroughStart(start: Int?) = setStartIfChanged(strikethroughStart, start) { strikethroughStart = it }
 
-  fun setH1Start(start: Int?) {
-    this.h1Start = start
-    emitStateChangeEvent()
-  }
+  fun setInlineCodeStart(start: Int?) = setStartIfChanged(inlineCodeStart, start) { inlineCodeStart = it }
 
-  fun setH2Start(start: Int?) {
-    this.h2Start = start
-    emitStateChangeEvent()
-  }
+  fun setH1Start(start: Int?) = setStartIfChanged(h1Start, start) { h1Start = it }
 
-  fun setH3Start(start: Int?) {
-    this.h3Start = start
-    emitStateChangeEvent()
-  }
+  fun setH2Start(start: Int?) = setStartIfChanged(h2Start, start) { h2Start = it }
 
-  fun setH4Start(start: Int?) {
-    this.h4Start = start
-    emitStateChangeEvent()
-  }
+  fun setH3Start(start: Int?) = setStartIfChanged(h3Start, start) { h3Start = it }
 
-  fun setH5Start(start: Int?) {
-    this.h5Start = start
-    emitStateChangeEvent()
-  }
+  fun setH4Start(start: Int?) = setStartIfChanged(h4Start, start) { h4Start = it }
 
-  fun setH6Start(start: Int?) {
-    this.h6Start = start
-    emitStateChangeEvent()
-  }
+  fun setH5Start(start: Int?) = setStartIfChanged(h5Start, start) { h5Start = it }
 
-  fun setCodeBlockStart(start: Int?) {
-    this.codeBlockStart = start
-    emitStateChangeEvent()
-  }
+  fun setH6Start(start: Int?) = setStartIfChanged(h6Start, start) { h6Start = it }
 
-  fun setBlockQuoteStart(start: Int?) {
-    this.blockQuoteStart = start
-    emitStateChangeEvent()
-  }
+  fun setCodeBlockStart(start: Int?) = setStartIfChanged(codeBlockStart, start) { codeBlockStart = it }
 
-  fun setOrderedListStart(start: Int?) {
-    this.orderedListStart = start
-    emitStateChangeEvent()
-  }
+  fun setBlockQuoteStart(start: Int?) = setStartIfChanged(blockQuoteStart, start) { blockQuoteStart = it }
 
-  fun setUnorderedListStart(start: Int?) {
-    this.unorderedListStart = start
-    emitStateChangeEvent()
-  }
+  fun setOrderedListStart(start: Int?) = setStartIfChanged(orderedListStart, start) { orderedListStart = it }
 
-  fun setCheckboxListStart(start: Int?) {
-    this.checkboxListStart = start
-    emitStateChangeEvent()
-  }
+  fun setUnorderedListStart(start: Int?) = setStartIfChanged(unorderedListStart, start) { unorderedListStart = it }
 
-  fun setLinkStart(start: Int?) {
-    this.linkStart = start
-    emitStateChangeEvent()
-  }
+  fun setCheckboxListStart(start: Int?) = setStartIfChanged(checkboxListStart, start) { checkboxListStart = it }
 
-  fun setImageStart(start: Int?) {
-    this.imageStart = start
-    emitStateChangeEvent()
-  }
+  fun setLinkStart(start: Int?) = setStartIfChanged(linkStart, start) { linkStart = it }
 
-  fun setMentionStart(start: Int?) {
-    this.mentionStart = start
-    emitStateChangeEvent()
-  }
+  fun setImageStart(start: Int?) = setStartIfChanged(imageStart, start) { imageStart = it }
+
+  fun setMentionStart(start: Int?) = setStartIfChanged(mentionStart, start) { mentionStart = it }
 
   fun getStart(name: String): Int? {
     val start =
@@ -251,6 +205,8 @@ class EnrichedSpanState(
   }
 
   private fun emitStateChangeEvent() {
+    if (!view.shouldEmitOnChangeState) return
+
     val context = view.context as ReactContext
     val surfaceId = UIManagerHelper.getSurfaceId(context)
     val dispatcher = UIManagerHelper.getEventDispatcherForReactTag(context, view.id)

@@ -1,7 +1,10 @@
 package com.swmansion.enriched.textinput.watchers
 
+import android.os.Handler
+import android.os.Looper
 import android.text.SpanWatcher
 import android.text.Spannable
+import android.text.SpannableString
 import android.text.style.MetricAffectingSpan
 import android.text.style.ParagraphStyle
 import com.facebook.react.bridge.ReactContext
@@ -14,11 +17,21 @@ import com.swmansion.enriched.textinput.events.OnChangeHtmlEvent
 import com.swmansion.enriched.textinput.spans.EnrichedInputOrderedListSpan
 import com.swmansion.enriched.textinput.spans.interfaces.EnrichedInputSpan
 import com.swmansion.enriched.textinput.utils.getSafeSpanBoundaries
+import java.util.concurrent.Executors
 
 class EnrichedSpanWatcher(
   private val view: EnrichedTextInputView,
 ) : SpanWatcher {
   private var previousHtml: String? = null
+  private val mainHandler = Handler(Looper.getMainLooper())
+
+  @Volatile
+  private var htmlGeneration = 0
+
+  private val emitHtmlRunnable =
+    Runnable {
+      emitLatestHtmlAsync()
+    }
 
   override fun onSpanAdded(
     text: Spannable,
@@ -90,10 +103,40 @@ class EnrichedSpanWatcher(
     // Emit event only if we change one of ours spans
     if (what != null && what !is EnrichedInputSpan) return
 
-    val html = EnrichedParser.toHtml(s)
-    if (html == previousHtml) return
+    scheduleHtmlEvent()
+  }
 
-    previousHtml = html
+  fun cancelPendingHtmlEvent() {
+    htmlGeneration++
+    mainHandler.removeCallbacks(emitHtmlRunnable)
+  }
+
+  private fun scheduleHtmlEvent() {
+    htmlGeneration++
+    mainHandler.removeCallbacks(emitHtmlRunnable)
+    mainHandler.postDelayed(emitHtmlRunnable, HTML_EMIT_DEBOUNCE_MS)
+  }
+
+  private fun emitLatestHtmlAsync() {
+    val generation = htmlGeneration
+    val snapshot = SpannableString(view.text ?: return)
+
+    htmlExecutor.execute {
+      if (generation != htmlGeneration) return@execute
+
+      val html = EnrichedParser.toHtml(snapshot)
+
+      mainHandler.post {
+        if (generation != htmlGeneration) return@post
+        if (html == previousHtml) return@post
+
+        previousHtml = html
+        dispatchHtmlEvent(html)
+      }
+    }
+  }
+
+  private fun dispatchHtmlEvent(html: String) {
     val context = view.context as ReactContext
     val surfaceId = UIManagerHelper.getSurfaceId(context)
     val dispatcher = UIManagerHelper.getEventDispatcherForReactTag(context, view.id)
@@ -105,5 +148,10 @@ class EnrichedSpanWatcher(
         view.experimentalSynchronousEvents,
       ),
     )
+  }
+
+  companion object {
+    private const val HTML_EMIT_DEBOUNCE_MS = 80L
+    private val htmlExecutor = Executors.newSingleThreadExecutor()
   }
 }

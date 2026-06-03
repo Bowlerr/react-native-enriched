@@ -36,22 +36,44 @@ object MeasurementStore {
     val paintParams: PaintParams,
   )
 
+  data class StoreResult(
+    val params: MeasurementParams,
+    val needUpdate: Boolean,
+  )
+
   private val data = ConcurrentHashMap<Int, MeasurementParams>()
 
-  fun store(
+  fun createStoreResult(
     id: Int,
     spannable: Spannable?,
     paint: TextPaint,
-  ): Boolean {
+  ): StoreResult {
     val cachedWidth = data[id]?.cachedWidth ?: 0f
     val cachedSize = data[id]?.cachedSize ?: 0L
     val initialized = data[id]?.initialized ?: true
 
     val size = measure(cachedWidth, spannable, paint)
     val paintParams = PaintParams(paint.typeface, paint.textSize)
+    val params = MeasurementParams(initialized, cachedWidth, size, spannable, paintParams)
 
-    data[id] = MeasurementParams(initialized, cachedWidth, size, spannable, paintParams)
-    return cachedSize != size
+    return StoreResult(params, cachedSize != size)
+  }
+
+  fun commitStoreResult(
+    id: Int,
+    result: StoreResult,
+  ): Boolean {
+    data[id] = result.params
+    return result.needUpdate
+  }
+
+  fun store(
+    id: Int,
+    spannable: Spannable?,
+    paint: TextPaint,
+  ): Boolean {
+    val result = createStoreResult(id, spannable, paint)
+    return commitStoreResult(id, result)
   }
 
   fun release(id: Int) {

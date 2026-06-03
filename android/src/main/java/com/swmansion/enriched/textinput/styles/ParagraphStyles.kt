@@ -238,6 +238,30 @@ class ParagraphStyles(
     s.setSpan(span, safeStart, safeEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
   }
 
+  private fun <T> extendActiveStyleSpanInPlace(
+    s: Editable,
+    start: Int,
+    end: Int,
+    type: Class<T>,
+  ): Boolean {
+    val spans = s.getSpans(start, end, type)
+    if (spans.size != 1) return false
+
+    val span = spans[0]
+    val spanStart = s.getSpanStart(span)
+    val spanEnd = s.getSpanEnd(span)
+    if (spanStart == -1 || spanEnd == -1) return false
+
+    val finalStart = spanStart.coerceAtMost(start)
+    val finalEnd = spanEnd.coerceAtLeast(end)
+    if (spanStart == finalStart && spanEnd == finalEnd) return true
+
+    val flags = s.getSpanFlags(span)
+    val (safeStart, safeEnd) = s.getSafeSpanBoundaries(finalStart, finalEnd)
+    s.setSpan(span, safeStart, safeEnd, flags)
+    return true
+  }
+
   private fun handleConflictsDuringNewlineDeletion(
     s: Editable,
     style: String,
@@ -334,7 +358,7 @@ class ParagraphStyles(
           }
         }
 
-        if (config.isContinuous) {
+        if (config.isContinuous && (isBackspace || isNewLine)) {
           mergeAdjacentStyleSpans(s, endCursorPosition, config.clazz)
         }
         continue
@@ -359,6 +383,10 @@ class ParagraphStyles(
       }
 
       var (start, end) = s.getParagraphBounds(styleStart, endCursorPosition)
+
+      if (!isBackspace && !isNewLine && extendActiveStyleSpanInPlace(s, start, end, config.clazz)) {
+        continue
+      }
 
       // handle conflicts when deleting newline from paragraph style (going back to previous line)
       if (isBackspace && styleStart != start) {

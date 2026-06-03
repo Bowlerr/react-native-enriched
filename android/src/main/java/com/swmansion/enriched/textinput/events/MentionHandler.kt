@@ -35,6 +35,8 @@ class MentionHandler(
     indicator: String,
     text: String?,
   ) {
+    if (!view.shouldEmitOnMention) return
+
     // Do not emit events too often
     if (previousText == text) return
 
