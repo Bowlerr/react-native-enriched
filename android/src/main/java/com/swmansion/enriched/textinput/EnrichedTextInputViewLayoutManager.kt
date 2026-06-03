@@ -39,6 +39,9 @@ class EnrichedTextInputViewLayoutManager(
     val text = view.text?.let { SpannableString(it) }
     val paint = TextPaint(view.paint)
 
+    // Plain style spans are safe to measure from a copied Spannable off-main.
+    // Image spans own Drawable state and can mutate bounds during measurement,
+    // so keep those measurements on the UI thread.
     if (hasImageSpans(text)) {
       measureAndPublishOnMain(generation, viewId, text, paint)
       return
