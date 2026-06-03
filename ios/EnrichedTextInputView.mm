@@ -32,8 +32,10 @@
   }
 
 static const NSTimeInterval EnrichedHtmlChangeDebounceDelay = 0.12;
+static const NSTimeInterval EnrichedLargeHtmlChangeDebounceDelay = 0.5;
 static const NSTimeInterval EnrichedHeightChangeDebounceDelay = 0.08;
 static const NSTimeInterval EnrichedRelayoutDebounceDelay = 1.0 / 60.0;
+static const NSUInteger EnrichedLargeHtmlChangeLengthThreshold = 2000;
 
 static BOOL EnrichedEditorMarkerMatchesBase(NSString *markerFormat,
                                             NSString *baseValue) {
@@ -1511,6 +1513,11 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
     return;
   }
 
+  NSTimeInterval delay = textView.textStorage.string.length >
+                                 EnrichedLargeHtmlChangeLengthThreshold
+                             ? EnrichedLargeHtmlChangeDebounceDelay
+                             : EnrichedHtmlChangeDebounceDelay;
+
   [NSObject cancelPreviousPerformRequestsWithTarget:self
                                            selector:@selector
                                            (tryEmittingOnChangeHtmlEvent)
@@ -1518,7 +1525,7 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
   _onChangeHtmlEventScheduled = YES;
   [self performSelector:@selector(tryEmittingOnChangeHtmlEvent)
              withObject:nil
-             afterDelay:EnrichedHtmlChangeDebounceDelay];
+             afterDelay:delay];
 }
 
 - (void)tryEmittingOnChangeHtmlEvent {
@@ -1901,8 +1908,11 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
     return;
   }
 
+  NSArray *currentDirtyRanges = [[attributesManager getDirtyRanges] copy];
+
   // zero width space adding or removal
-  [ZeroWidthSpaceUtils handleZeroWidthSpacesInHost:self];
+  [ZeroWidthSpaceUtils handleZeroWidthSpacesInHost:self
+                                       dirtyRanges:currentDirtyRanges];
 
   // emptying input typing attributes management
   if (textView.textStorage.string.length == 0 &&
@@ -1928,7 +1938,6 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
   }
 
   // modified words handling
-  NSArray *currentDirtyRanges = [attributesManager getDirtyRanges];
   if (currentDirtyRanges.count > 0) {
     NSMutableArray *modifiedWords = [[NSMutableArray alloc] init];
 
