@@ -306,13 +306,7 @@ class ListStyles(
       }
 
       s.insert(cursorPosition, EnrichedConstants.ZWS_STRING)
-      val previousChecked =
-        if (previousListSpan is EnrichedInputCheckboxListSpan) {
-          previousListSpan.isChecked
-        } else {
-          false
-        }
-      setSpan(s, name, start, end + 1, previousChecked, getListLevel(previousListSpan))
+      setSpan(s, name, start, end + 1, false, getListLevel(previousListSpan))
       // Inform that new span has been added
       view.selection?.validateStyles()
       return
