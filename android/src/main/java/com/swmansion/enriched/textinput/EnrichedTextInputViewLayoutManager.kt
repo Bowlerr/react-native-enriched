@@ -5,6 +5,7 @@ import android.os.Looper
 import android.text.SpannableString
 import android.text.TextPaint
 import com.facebook.react.bridge.Arguments
+import com.swmansion.enriched.common.spans.EnrichedImageSpan
 import java.util.concurrent.Executors
 
 class EnrichedTextInputViewLayoutManager(
@@ -38,6 +39,11 @@ class EnrichedTextInputViewLayoutManager(
     val text = view.text?.let { SpannableString(it) }
     val paint = TextPaint(view.paint)
 
+    if (hasImageSpans(text)) {
+      measureAndPublishOnMain(generation, viewId, text, paint)
+      return
+    }
+
     measurementExecutor.execute {
       if (generation != layoutGeneration) return@execute
 
@@ -48,15 +54,38 @@ class EnrichedTextInputViewLayoutManager(
       if (!needUpdate) return@execute
 
       mainHandler.post {
-        if (generation != layoutGeneration) return@post
-
-        val counter = forceHeightRecalculationCounter
-        forceHeightRecalculationCounter++
-        val state = Arguments.createMap()
-        state.putInt("forceHeightRecalculationCounter", counter)
-        view.stateWrapper?.updateState(state)
+        publishHeightUpdate(generation)
       }
     }
+  }
+
+  private fun hasImageSpans(text: SpannableString?): Boolean {
+    if (text == null) return false
+    return text.getSpans(0, text.length, EnrichedImageSpan::class.java).isNotEmpty()
+  }
+
+  private fun measureAndPublishOnMain(
+    generation: Int,
+    viewId: Int,
+    text: SpannableString?,
+    paint: TextPaint,
+  ) {
+    if (generation != layoutGeneration) return
+
+    val needUpdate = MeasurementStore.store(viewId, text, paint)
+    if (!needUpdate) return
+
+    publishHeightUpdate(generation)
+  }
+
+  private fun publishHeightUpdate(generation: Int) {
+    if (generation != layoutGeneration) return
+
+    val counter = forceHeightRecalculationCounter
+    forceHeightRecalculationCounter++
+    val state = Arguments.createMap()
+    state.putInt("forceHeightRecalculationCounter", counter)
+    view.stateWrapper?.updateState(state)
   }
 
   fun releaseMeasurementStore() {

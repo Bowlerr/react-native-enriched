@@ -28,8 +28,7 @@
 - (void)addTypingWithValue:(NSString *)value;
 - (void)removeTyping;
 - (BOOL)styleCondition:(id)value range:(NSRange)range;
-- (BOOL)matchesParagraphMarker:(NSString *)markerFormat
-                          value:(NSString *)value;
+- (BOOL)matchesParagraphMarker:(NSString *)markerFormat value:(NSString *)value;
 - (BOOL)detect:(NSRange)range;
 - (BOOL)any:(NSRange)range;
 - (NSArray<StylePair *> *)all:(NSRange)range;

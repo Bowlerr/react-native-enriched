@@ -2017,9 +2017,26 @@ Class<RCTComponentViewProtocol> EnrichedTextInputViewCls(void) {
     return;
   }
 
-  NSRange wholeRange = NSMakeRange(0, textView.textStorage.string.length);
-  [textView.layoutManager invalidateDisplayForCharacterRange:wholeRange];
-  [self layoutAttachments];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (!self->textView) {
+      return;
+    }
+
+    NSRange wholeRange =
+        NSMakeRange(0, self->textView.textStorage.string.length);
+    NSRange actualRange = NSMakeRange(0, 0);
+    [self->textView.layoutManager
+        invalidateLayoutForCharacterRange:wholeRange
+                     actualCharacterRange:&actualRange];
+    [self->textView.layoutManager ensureLayoutForCharacterRange:actualRange];
+    [self->textView.layoutManager
+        invalidateDisplayForCharacterRange:wholeRange];
+
+    [self layoutAttachments];
+
+    CGSize measuredSize = [self measureSize:self->textView.frame.size.width];
+    self->textView.contentSize = measuredSize;
+  });
 }
 
 - (void)didMoveToWindow {

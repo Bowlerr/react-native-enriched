@@ -760,6 +760,28 @@ User can later toggle each checkbox individually by tapping on it.
 
 - `checked: boolean` - defines whether the checkboxes should be checked or unchecked by default.
 
+### `.increaseListLevel()`
+
+```ts
+increaseListLevel: () => void;
+```
+
+Increases the nesting level of the current list item or selected list items.
+
+On native platforms, when the current selection is not inside a list item, this command increases the nesting level of the current block quote if one is active.
+On web, this command only applies to list items.
+
+### `.decreaseListLevel()`
+
+```ts
+decreaseListLevel: () => void;
+```
+
+Decreases the nesting level of the current list item or selected list items.
+
+On native platforms, when the current selection is not inside a list item, this command decreases the nesting level of the current block quote if one is active.
+On web, this command only applies to list items.
+
 ## HtmlStyle type
 
 Allows customizing HTML styles.

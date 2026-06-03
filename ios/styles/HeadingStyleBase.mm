@@ -55,9 +55,9 @@ static BOOL EnrichedHeadingParagraphHasList(NSParagraphStyle *pStyle) {
                 CGFloat headingFontSize = [self getHeadingFontSize];
                 NSParagraphStyle *paragraphStyle =
                     [self.host.textView.textStorage
-                         attribute:NSParagraphStyleAttributeName
-                           atIndex:subRange.location
-                    effectiveRange:nil];
+                             attribute:NSParagraphStyleAttributeName
+                               atIndex:subRange.location
+                        effectiveRange:nil];
                 if (EnrichedHeadingParagraphHasList(paragraphStyle)) {
                   headingFontSize =
                       MIN(headingFontSize,

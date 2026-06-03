@@ -40,14 +40,8 @@ class ListStyles(
     s: Int,
     level: Int = 0,
   ): Int {
-    val span = getPreviousParagraphSpan(spannable, s, EnrichedInputOrderedListSpan::class.java)
-    val index =
-      if (span?.level == level) {
-        span.getListIndex()
-      } else {
-        0
-      }
-    return index + 1
+    val span = getPreviousOrderedSibling(spannable, s, level)
+    return (span?.getListIndex() ?: 0) + 1
   }
 
   private fun getListLevel(span: Any?): Int = (span as? EnrichedListSpan)?.level ?: 0
@@ -56,6 +50,85 @@ class ListStyles(
     spans
       .filterIsInstance<EnrichedListSpan>()
       .maxByOrNull { it.level }
+
+  private fun getListSpansAtParagraphStart(
+    spannable: Spannable,
+    start: Int,
+    end: Int,
+  ): List<EnrichedListSpan> =
+    spannable
+      .getSpans(start, end, EnrichedListSpan::class.java)
+      .filter { spannable.getSpanStart(it) == start }
+
+  private fun getDeepestListSpanAtParagraphStart(
+    spannable: Spannable,
+    start: Int,
+    end: Int,
+  ): EnrichedListSpan? =
+    getListSpansAtParagraphStart(spannable, start, end)
+      .maxByOrNull { it.level }
+
+  private fun getDeepestOrderedSpanAtParagraphStart(
+    spannable: Spannable,
+    start: Int,
+    end: Int,
+  ): EnrichedInputOrderedListSpan? =
+    spannable
+      .getSpans(start, end, EnrichedInputOrderedListSpan::class.java)
+      .filter { spannable.getSpanStart(it) == start }
+      .maxByOrNull { it.level }
+
+  private fun removeCountersFromLevel(
+    counters: MutableMap<Int, Int>,
+    level: Int,
+  ) {
+    counters.keys.filter { it >= level }.forEach { counters.remove(it) }
+  }
+
+  private fun removeCountersAboveLevel(
+    counters: MutableMap<Int, Int>,
+    level: Int,
+  ) {
+    counters.keys.filter { it > level }.forEach { counters.remove(it) }
+  }
+
+  private fun getPreviousOrderedSibling(
+    spannable: Spannable,
+    s: Int,
+    level: Int,
+  ): EnrichedInputOrderedListSpan? {
+    var paragraphStart = s
+
+    while (paragraphStart > 0) {
+      val (previousParagraphStart, previousParagraphEnd) =
+        spannable.getParagraphBounds(paragraphStart - 1)
+      val orderedSpan =
+        getDeepestOrderedSpanAtParagraphStart(
+          spannable,
+          previousParagraphStart,
+          previousParagraphEnd,
+        )
+
+      if (orderedSpan != null) {
+        if (orderedSpan.level == level) return orderedSpan
+        if (orderedSpan.level < level) return null
+      }
+
+      val listSpan =
+        getDeepestListSpanAtParagraphStart(
+          spannable,
+          previousParagraphStart,
+          previousParagraphEnd,
+        )
+      if (listSpan == null || listSpan.level <= level) {
+        return null
+      }
+
+      paragraphStart = previousParagraphStart
+    }
+
+    return null
+  }
 
   private fun setSpan(
     spannable: Spannable,
@@ -116,20 +189,19 @@ class ListStyles(
 
     while (paragraphStart < text.length) {
       val (start, end) = text.getParagraphBounds(paragraphStart)
-      val orderedSpans =
-        text
-          .getSpans(start, end, EnrichedInputOrderedListSpan::class.java)
-          .filter { text.getSpanStart(it) == start }
+      val orderedSpan = getDeepestOrderedSpanAtParagraphStart(text, start, end)
+      val listSpan = getDeepestListSpanAtParagraphStart(text, start, end)
 
-      if (orderedSpans.isEmpty()) {
+      if (listSpan == null) {
         counters.clear()
+      } else if (orderedSpan == null) {
+        removeCountersFromLevel(counters, listSpan.level.coerceAtLeast(0))
       } else {
-        val span = orderedSpans.maxByOrNull { it.level } ?: orderedSpans[0]
-        val level = span.level.coerceAtLeast(0)
-        counters.keys.filter { it > level }.forEach { counters.remove(it) }
+        val level = orderedSpan.level.coerceAtLeast(0)
+        removeCountersAboveLevel(counters, level)
         val nextIndex = (counters[level] ?: 0) + 1
         counters[level] = nextIndex
-        span.setListIndex(nextIndex)
+        orderedSpan.setListIndex(nextIndex)
       }
 
       if (end >= text.length) {
