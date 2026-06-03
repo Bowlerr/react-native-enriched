@@ -423,8 +423,9 @@ TEST(GumboParserTest, DivRemappings) {
           "craziness</div><span><blockquote><div><div><ul><li><b>another one "
           "</b>hello<div><br></div><div>hi</div></li></ul></div></div></"
           "blockquote></span>"),
-      "<p>what do you think of this craziness</p><blockquote><p><b>another one "
-      "</b>hello</p><p>hi</p></blockquote>");
+      "<p>what do you think of this "
+      "craziness</p><blockquote><ul><li><b>another "
+      "one </b>hello<br><p>hi</p></li></ul></blockquote>");
 }
 
 TEST(GumboParserTest, ListFlattening) {
@@ -468,7 +469,7 @@ TEST(GumboParserTest, ListFlattening) {
   EXPECT_EQ(GumboParser::normalizeHtml(
                 "<ul><li><b>another one </b>hi "
                 "kacper,<div><br></div><div>hi</div></li></ul>"),
-            "<ul><li><b>another one </b>hi kacper,</li><li>hi</li></ul>");
+            "<ul><li><b>another one </b>hi kacper,<br><p>hi</p></li></ul>");
   EXPECT_EQ(GumboParser::normalizeHtml(
                 "<ol><li>parent<ul data-type='checkbox'><li "
                 "checked>done</li><li>todo</li></ul></li></ol>"),
@@ -478,6 +479,32 @@ TEST(GumboParserTest, ListFlattening) {
       GumboParser::normalizeHtml(
           "<ul><li>parent<ol><li>first</li><li>second</li></ol></li></ul>"),
       "<ul><li>parent<ol><li>first</li><li>second</li></ol></li></ul>");
+  EXPECT_EQ(GumboParser::normalizeHtml(
+                "<ul><li>Parent<ol><li>Number</li><ul><li>Bullet</li></ul></"
+                "ol></li></ul>"),
+            "<ul><li>Parent<ol><li>Number</li><li>Bullet</li></ol></li></ul>");
+  EXPECT_EQ(GumboParser::normalizeHtml(
+                "<ol><li>Parent<ul data-type='checkbox'><li checked>Done</li>"
+                "</ul></li><li>Next</li></ol>"),
+            "<ol><li>Parent<ul data-type=\"checkbox\"><li "
+            "checked>Done</li></ul></li><li>Next</li></ol>");
+  EXPECT_EQ(GumboParser::normalizeHtml("<ol><ol><ol><li>Deep</li></ol></ol></"
+                                       "ol>"),
+            "<ol><li>Deep</li></ol>");
+}
+
+TEST(GumboParserTest, NestedBlockquotesPreserveBlockContent) {
+  EXPECT_EQ(
+      GumboParser::normalizeHtml(
+          "<blockquote><p>Outer</p><blockquote><p>Inner</p><ul><li>Bullet</"
+          "li></ul></blockquote></blockquote>"),
+      "<blockquote><p>Outer</p><blockquote><p>Inner</p><ul><li>Bullet</li></"
+      "ul></blockquote></blockquote>");
+  EXPECT_EQ(GumboParser::normalizeHtml(
+                "<blockquote><pre>Code block inside quote\nLine 2</pre><ul><li>"
+                "Item</li></ul></blockquote>"),
+            "<blockquote><codeblock><p>Code block inside quote\nLine 2</p></"
+            "codeblock><ul><li>Item</li></ul></blockquote>");
 }
 
 TEST(GumboParserTest, BrRemappings) {

@@ -59,6 +59,10 @@ import { EnrichedUnorderedList } from './formats/EnrichedUnorderedList';
 import { EnrichedOrderedList } from './formats/EnrichedOrderedList';
 import { EnrichedCheckboxItem } from './formats/EnrichedCheckboxItem';
 import { EnrichedCheckboxList } from './formats/EnrichedCheckboxList';
+import {
+  decreaseWebListLevel,
+  increaseWebListLevel,
+} from './formats/listLevelCommands';
 import { createStripBoldInStyledHeadingsPlugin } from './pmPlugins/stripBoldInStyledHeadingsPlugin';
 import { StrictMarksPlugin } from './pmPlugins/strictMarksPlugin';
 import { MergeAdjacentSameKindBlocksPlugin } from './pmPlugins/mergeAdjacentSameKindBlocksPlugin';
@@ -343,18 +347,12 @@ export const EnrichedTextInput = ({
         runFocused(editor, (c) => c.toggleUnorderedList()),
       toggleCheckboxList: (checked: boolean) =>
         runFocused(editor, (c) => c.toggleCheckboxList(checked)),
-      increaseListLevel: () =>
-        runFocused(editor, (c) =>
-          editor.isActive('checkboxItem')
-            ? c.sinkListItem('checkboxItem')
-            : c.sinkListItem('listItem')
-        ),
-      decreaseListLevel: () =>
-        runFocused(editor, (c) =>
-          editor.isActive('checkboxItem')
-            ? c.liftListItem('checkboxItem')
-            : c.liftListItem('listItem')
-        ),
+      increaseListLevel: () => {
+        increaseWebListLevel(editor);
+      },
+      decreaseListLevel: () => {
+        decreaseWebListLevel(editor);
+      },
       setLink: (start: number, end: number, text: string, url: string) =>
         setLink(editor, start, end, text, url),
       removeLink: (start: number, end: number) =>
