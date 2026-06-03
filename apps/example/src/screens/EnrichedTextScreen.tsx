@@ -9,7 +9,6 @@ import {
 import { Button } from '../components/Button';
 import { ValueModal } from '../components/ValueModal';
 import { enrichedTextHtmlStyle } from '../constants/editorConfig';
-import { STRESS_TEST_HTML } from '../constants/stressTestHtml';
 import {
   TEXT_VIEWER_HTML_EXAMPLES,
   type TextViewerExample,
@@ -73,16 +72,6 @@ export function EnrichedTextScreen({ onSwitch }: EnrichedTextScreenProps) {
             onPress={() => setIsModalOpen(true)}
             style={styles.rowButton}
             testID="set-enriched-text-button"
-          />
-        </View>
-        <View style={styles.buttonRow}>
-          <Button
-            title="Set Example"
-            onPress={() => {
-              applyHtml(STRESS_TEST_HTML, 'full-stress');
-            }}
-            style={styles.rowButton}
-            testID="set-enriched-text-example-button"
           />
         </View>
         <View style={styles.sectionContainer}>
