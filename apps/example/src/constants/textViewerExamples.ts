@@ -1,10 +1,14 @@
 import { STRESS_TEST_HTML } from './stressTestHtml';
+import { INPUT_HTML_EXAMPLES } from './inputExamples';
 
 export interface TextViewerExample {
   key: string;
   title: string;
   html: string;
 }
+
+const INPUT_EXAMPLES_FOR_TEXT_VIEWER: TextViewerExample[] =
+  INPUT_HTML_EXAMPLES.filter((example) => example.key !== 'full-stress');
 
 export const TEXT_VIEWER_HTML_EXAMPLES: TextViewerExample[] = [
   {
@@ -268,6 +272,7 @@ Line 2 inside list item</code></pre>
 </ul>
 `,
   },
+  ...INPUT_EXAMPLES_FOR_TEXT_VIEWER,
   {
     key: 'truncation',
     title: 'Truncation',

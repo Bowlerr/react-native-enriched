@@ -185,8 +185,9 @@ static NSString *EnrichedBlockQuoteMarker(NSParagraphStyle *pStyle) {
 
                 CGFloat indent = (hasNestedLayoutMarker ? listIndent : 0.0) +
                                  blockquoteIndent;
-                pStyle.headIndent = indent;
-                pStyle.firstLineHeadIndent = indent;
+                pStyle.headIndent = MAX(pStyle.headIndent, indent);
+                pStyle.firstLineHeadIndent =
+                    MAX(pStyle.firstLineHeadIndent, indent);
                 if (!hasNestedLayoutMarker) {
                   pStyle.paragraphSpacingBefore =
                       MAX(pStyle.paragraphSpacingBefore, 12.0);

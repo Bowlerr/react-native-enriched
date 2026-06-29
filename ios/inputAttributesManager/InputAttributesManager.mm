@@ -13,6 +13,46 @@
   NSMutableSet *_removedTypingAttributes;
 }
 
+static NSInteger EnrichedInputStyleApplicationRank(NSNumber *styleType,
+                                                   StyleBase *style) {
+  if ([styleType isEqualToNumber:@([BlockQuoteStyle getType])]) {
+    return 0;
+  }
+
+  if ([styleType isEqualToNumber:@([UnorderedListStyle getType])] ||
+      [styleType isEqualToNumber:@([OrderedListStyle getType])] ||
+      [styleType isEqualToNumber:@([CheckboxListStyle getType])]) {
+    return 1;
+  }
+
+  if ([styleType isEqualToNumber:@([CodeBlockStyle getType])]) {
+    return 2;
+  }
+
+  if ([styleType isEqualToNumber:@([H1Style getType])] ||
+      [styleType isEqualToNumber:@([H2Style getType])] ||
+      [styleType isEqualToNumber:@([H3Style getType])] ||
+      [styleType isEqualToNumber:@([H4Style getType])] ||
+      [styleType isEqualToNumber:@([H5Style getType])] ||
+      [styleType isEqualToNumber:@([H6Style getType])]) {
+    return 3;
+  }
+
+  if ([styleType isEqualToNumber:@([AlignmentStyle getType])]) {
+    return 4;
+  }
+
+  if ([style isParagraph]) {
+    return 5;
+  }
+
+  if ([styleType isEqualToNumber:@([InlineCodeStyle getType])]) {
+    return 7;
+  }
+
+  return 6;
+}
+
 - (instancetype)initWithInput:(EnrichedTextInputView *)input {
   self = [super init];
   _input = input;
@@ -95,17 +135,23 @@
     [ZeroWidthSpaceUtils applyKernForZeroWidthSpacesInRange:dirtyRange
                                                        host:_input];
 
-    // Sort style types so paragraph styles come first. Their broad visual
-    // attributes (e.g. foreground color, font) are laid down before inline
-    // styles override them on their specific sub-ranges.
+    // Sort style types so paragraph metadata is restored and styled in a stable
+    // cascade. Nested quote/list/code paragraphs share NSParagraphStyle, so
+    // relying on dictionary order can make one paragraph style flatten another.
     NSArray *sortedStyleTypes = [presentStyles.allKeys
         sortedArrayUsingComparator:^NSComparisonResult(NSNumber *a,
                                                        NSNumber *b) {
-          BOOL aPara = [_input->stylesDict[a] isParagraph];
-          BOOL bPara = [_input->stylesDict[b] isParagraph];
-          if (aPara == bPara)
-            return NSOrderedSame;
-          return aPara ? NSOrderedAscending : NSOrderedDescending;
+          NSInteger aRank =
+              EnrichedInputStyleApplicationRank(a, _input->stylesDict[a]);
+          NSInteger bRank =
+              EnrichedInputStyleApplicationRank(b, _input->stylesDict[b]);
+          if (aRank < bRank) {
+            return NSOrderedAscending;
+          }
+          if (aRank > bRank) {
+            return NSOrderedDescending;
+          }
+          return [a compare:b];
         }];
 
     // re-apply meta-attributes and apply visual styling following the saved
@@ -118,7 +164,10 @@
       for (StylePair *stylePair in presentStyles[styleType]) {
         NSRange occurenceRange = [stylePair.rangeValue rangeValue];
         [style reapplyFromStylePair:stylePair];
-        [style applyStyling:occurenceRange];
+        NSRange applyRange = [style isParagraph]
+                                 ? [style actualUsedRange:occurenceRange]
+                                 : occurenceRange;
+        [style applyStyling:applyRange];
       }
     }
   }

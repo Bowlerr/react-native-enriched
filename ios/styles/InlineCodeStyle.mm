@@ -10,6 +10,11 @@ static BOOL EnrichedInlineCodeIsDecorativeCharacter(unichar character) {
          character == 0x200B || character == 0xFFFC;
 }
 
+static BOOL
+EnrichedInlineCodeIsInvisibleFormattingCharacter(unichar character) {
+  return character == 0x200B || character == 0xFFFC;
+}
+
 static NSRange EnrichedInlineCodeVisibleRange(NSString *text, NSRange range) {
   if (range.location >= text.length || range.length == 0) {
     return NSMakeRange(range.location, 0);
@@ -30,6 +35,24 @@ static NSRange EnrichedInlineCodeVisibleRange(NSString *text, NSRange range) {
   return NSMakeRange(start, end - start);
 }
 
+static BOOL EnrichedInlineCodeAllowsTrailingPadding(NSString *text,
+                                                    NSRange visibleRange) {
+  NSUInteger nextLocation = NSMaxRange(visibleRange);
+  while (nextLocation < text.length &&
+         EnrichedInlineCodeIsInvisibleFormattingCharacter(
+             [text characterAtIndex:nextLocation])) {
+    nextLocation++;
+  }
+
+  if (nextLocation >= text.length) {
+    return YES;
+  }
+
+  unichar nextCharacter = [text characterAtIndex:nextLocation];
+  return [[NSCharacterSet whitespaceAndNewlineCharacterSet]
+      characterIsMember:nextCharacter];
+}
+
 static void
 EnrichedInlineCodeApplyTrailingPadding(NSMutableAttributedString *textStorage,
                                        NSString *text, NSRange range,
@@ -40,6 +63,9 @@ EnrichedInlineCodeApplyTrailingPadding(NSMutableAttributedString *textStorage,
   }
 
   [textStorage removeAttribute:NSKernAttributeName range:visibleRange];
+  if (!EnrichedInlineCodeAllowsTrailingPadding(text, visibleRange)) {
+    return;
+  }
 
   NSRange trailingCharacterRange = NSMakeRange(NSMaxRange(visibleRange) - 1, 1);
   [textStorage addAttribute:NSKernAttributeName
@@ -76,9 +102,34 @@ EnrichedInlineCodeParagraphHasBlockMarker(NSParagraphStyle *pStyle) {
 }
 
 - (void)applyStyling:(NSRange)range {
-  // we don't want to apply inline code to newline characters, it looks bad
-  NSArray *nonNewlineRanges =
-      [RangeUtils getNonNewlineRangesIn:self.host.textView range:range];
+  if (range.location >= self.host.textView.textStorage.length) {
+    return;
+  }
+
+  NSUInteger safeLength =
+      MIN(range.length, self.host.textView.textStorage.length - range.location);
+  NSRange safeRange = NSMakeRange(range.location, safeLength);
+
+  NSMutableArray<NSValue *> *styledRanges = [[NSMutableArray alloc] init];
+  [self.host.textView.textStorage
+      enumerateAttribute:[self getKey]
+                 inRange:safeRange
+                 options:0
+              usingBlock:^(id _Nullable value, NSRange attributeRange,
+                           BOOL *_Nonnull stop) {
+                if ([self styleCondition:value range:attributeRange]) {
+                  [styledRanges
+                      addObject:[NSValue valueWithRange:attributeRange]];
+                }
+              }];
+
+  NSMutableArray<NSValue *> *nonNewlineRanges = [[NSMutableArray alloc] init];
+  for (NSValue *value in styledRanges) {
+    [nonNewlineRanges
+        addObjectsFromArray:[RangeUtils
+                                getNonNewlineRangesIn:self.host.textView
+                                                range:[value rangeValue]]];
+  }
 
   for (NSValue *value in nonNewlineRanges) {
     NSRange subRange = [value rangeValue];

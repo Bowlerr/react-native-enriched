@@ -326,6 +326,28 @@
   return [NSString stringWithFormat:@"%@ %@", params, contextParams];
 }
 
++ (NSString *)paramsByAppendingCurrentBlockQuoteContext:(NSString *)params
+                                            ongoingTags:
+                                                (NSDictionary *)ongoingTags {
+  NSArray *blockQuoteStack = ongoingTags[@"blockquote"];
+  NSArray *currentBlockQuote = blockQuoteStack.lastObject;
+  if (currentBlockQuote.count <= 2) {
+    return params;
+  }
+
+  NSString *blockQuoteParams = (NSString *)currentBlockQuote[2];
+  NSInteger quoteContextId =
+      [self blockQuoteContextFromParams:blockQuoteParams];
+  if (quoteContextId < 0) {
+    return params;
+  }
+
+  NSInteger quoteLevel = [self blockQuoteLevelFromParams:blockQuoteParams];
+  return [self paramsByAppendingBlockQuoteContext:params
+                                            level:quoteLevel
+                                        contextId:quoteContextId];
+}
+
 + (NSInteger)listLevelFromParams:(NSString *)params {
   NSRegularExpression *levelRegex = [NSRegularExpression
       regularExpressionWithPattern:
@@ -1034,6 +1056,10 @@
                 [self paramsByAppendingBlockQuoteContext:tagParams
                                                    level:quoteLevel
                                                contextId:currentQuoteContextId];
+          } else if ([currentTagName isEqualToString:@"codeblock"]) {
+            tagParams =
+                [self paramsByAppendingCurrentBlockQuoteContext:tagParams
+                                                    ongoingTags:ongoingTags];
           } else if ([currentTagName isEqualToString:@"li"] &&
                      ongoingListTags.count > 0) {
             BOOL isCheckboxListItem =
@@ -1051,6 +1077,9 @@
                                                listTag:parentListTag
                                                  level:listLevel
                                              contextId:currentListContextId];
+            tagParams =
+                [self paramsByAppendingCurrentBlockQuoteContext:tagParams
+                                                    ongoingTags:ongoingTags];
           }
 
           if (tagParams.length > 0) {
@@ -1370,6 +1399,20 @@
         [listStyleArr addObject:styleType];
         [listStyleArr addObject:listStylePair];
         [processedStyles addObject:listStyleArr];
+
+        NSInteger quoteContextId = [self blockQuoteContextFromParams:params];
+        if (quoteContextId >= 0) {
+          NSMutableArray *blockQuoteStyleArr = [[NSMutableArray alloc] init];
+          StylePair *blockQuoteStylePair = [[StylePair alloc] init];
+          blockQuoteStylePair.rangeValue = paragraphRanges[paragraphIndex];
+          blockQuoteStylePair.styleValue =
+              [self blockQuoteMarkerValueWithLevel:
+                        [self blockQuoteLevelFromParams:params]
+                                         contextId:quoteContextId];
+          [blockQuoteStyleArr addObject:@([BlockQuoteStyle getType])];
+          [blockQuoteStyleArr addObject:blockQuoteStylePair];
+          [processedStyles addObject:blockQuoteStyleArr];
+        }
       }
       continue;
     } else if ([tagName isEqualToString:@"ul"]) {
@@ -1388,6 +1431,20 @@
                                      contextId:quoteContextId];
     } else if ([tagName isEqualToString:@"codeblock"]) {
       [styleArr addObject:@([CodeBlockStyle getType])];
+
+      NSInteger quoteContextId = [self blockQuoteContextFromParams:params];
+      if (quoteContextId >= 0) {
+        NSMutableArray *blockQuoteStyleArr = [[NSMutableArray alloc] init];
+        StylePair *blockQuoteStylePair = [[StylePair alloc] init];
+        blockQuoteStylePair.rangeValue = tagRangeValue;
+        blockQuoteStylePair.styleValue = [self
+            blockQuoteMarkerValueWithLevel:[self
+                                               blockQuoteLevelFromParams:params]
+                                 contextId:quoteContextId];
+        [blockQuoteStyleArr addObject:@([BlockQuoteStyle getType])];
+        [blockQuoteStyleArr addObject:blockQuoteStylePair];
+        [processedStyles addObject:blockQuoteStyleArr];
+      }
     } else {
       // some other external tags like span just don't get put into the
       // processed styles

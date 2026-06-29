@@ -30,14 +30,38 @@ static BOOL EnrichedCodeBlockParagraphHasVisibleContent(NSString *text,
 
 static BOOL EnrichedCodeBlockListMarkerMatches(NSString *markerFormat,
                                                NSString *baseValue) {
-  return markerFormat != nullptr &&
-         ([markerFormat isEqualToString:baseValue] ||
-          [markerFormat hasPrefix:[baseValue stringByAppendingString:@":"]]);
+  if (markerFormat == nullptr) {
+    return NO;
+  }
+
+  NSString *continuationBaseValue =
+      [baseValue stringByAppendingString:@"Continuation"];
+  return [markerFormat isEqualToString:baseValue] ||
+         [markerFormat hasPrefix:[baseValue stringByAppendingString:@":"]] ||
+         [markerFormat isEqualToString:continuationBaseValue] ||
+         [markerFormat
+             hasPrefix:[continuationBaseValue stringByAppendingString:@":"]];
 }
 
 static NSInteger EnrichedCodeBlockListLevel(NSString *markerFormat,
                                             NSString *baseValue) {
   if (!EnrichedCodeBlockListMarkerMatches(markerFormat, baseValue)) {
+    return -1;
+  }
+
+  NSRange separator = [markerFormat rangeOfString:@":"];
+  if (separator.location == NSNotFound) {
+    return 0;
+  }
+
+  NSString *levelString =
+      [markerFormat substringFromIndex:separator.location + separator.length];
+  return MAX(0, [levelString integerValue]);
+}
+
+static NSInteger EnrichedCodeBlockCheckboxLevel(NSString *markerFormat) {
+  if (markerFormat == nullptr ||
+      ![markerFormat hasPrefix:@"EnrichedCheckbox"]) {
     return -1;
   }
 
@@ -67,6 +91,40 @@ static CGFloat EnrichedCodeBlockBlockQuoteIndent(id<EnrichedViewHost> host,
   return ([host.config blockquoteBorderWidth] +
           [host.config blockquoteGapWidth]) *
          (blockquoteLevel + 1);
+}
+
+static CGFloat EnrichedCodeBlockNestedListIndent(id<EnrichedViewHost> host,
+                                                 NSParagraphStyle *pStyle) {
+  CGFloat listIndent = 0.0;
+
+  for (NSTextList *textList in pStyle.textLists) {
+    NSString *markerFormat = textList.markerFormat;
+    NSInteger unorderedLevel =
+        EnrichedCodeBlockListLevel(markerFormat, @"EnrichedUnorderedList");
+    if (unorderedLevel >= 0) {
+      listIndent = MAX(listIndent, [host.config unorderedListMarginLeft] *
+                                           (unorderedLevel + 1) +
+                                       [host.config unorderedListGapWidth]);
+    }
+
+    NSInteger orderedLevel =
+        EnrichedCodeBlockListLevel(markerFormat, @"EnrichedOrderedList");
+    if (orderedLevel >= 0) {
+      listIndent = MAX(listIndent, [host.config orderedListMarginLeft] *
+                                           (orderedLevel + 1) +
+                                       [host.config orderedListGapWidth]);
+    }
+
+    NSInteger checkboxLevel = EnrichedCodeBlockCheckboxLevel(markerFormat);
+    if (checkboxLevel >= 0) {
+      listIndent = MAX(listIndent, [host.config checkboxListMarginLeft] *
+                                           (checkboxLevel + 1) +
+                                       [host.config checkboxListGapWidth] +
+                                       [host.config checkboxListBoxSize]);
+    }
+  }
+
+  return listIndent;
 }
 
 @implementation CodeBlockStyle
@@ -130,9 +188,10 @@ static CGFloat EnrichedCodeBlockBlockQuoteIndent(id<EnrichedViewHost> host,
     NSMutableParagraphStyle *pStyle =
         existingStyle != nullptr ? [existingStyle mutableCopy]
                                  : [[NSMutableParagraphStyle alloc] init];
-    CGFloat requiredHeadIndent =
+    CGFloat contextIndent =
         EnrichedCodeBlockBlockQuoteIndent(self.host, pStyle) +
-        horizontalPadding;
+        EnrichedCodeBlockNestedListIndent(self.host, pStyle);
+    CGFloat requiredHeadIndent = contextIndent + horizontalPadding;
 
     pStyle.headIndent = MAX(pStyle.headIndent, requiredHeadIndent);
     pStyle.firstLineHeadIndent =

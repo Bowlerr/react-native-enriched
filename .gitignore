@@ -91,3 +91,10 @@ nitrogen/
 
 # Maestro screenshot diffs
 .maestro/**/*_diff.png
+
+# Argent local tooling
+.agents/skills/argent-*/
+.codex/config.toml
+.cursor/mcp.json
+.cursor/rules/argent.md
+skills-lock.json

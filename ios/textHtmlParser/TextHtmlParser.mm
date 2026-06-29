@@ -10,6 +10,29 @@
 
 @implementation TextHtmlParser
 
+static BOOL EnrichedHtmlStyleTypeIsHeading(NSNumber *styleType) {
+  return [styleType isEqualToNumber:@([H1Style getType])] ||
+         [styleType isEqualToNumber:@([H2Style getType])] ||
+         [styleType isEqualToNumber:@([H3Style getType])] ||
+         [styleType isEqualToNumber:@([H4Style getType])] ||
+         [styleType isEqualToNumber:@([H5Style getType])] ||
+         [styleType isEqualToNumber:@([H6Style getType])];
+}
+
+static BOOL EnrichedHtmlStyleTypeIsList(NSNumber *styleType) {
+  return [styleType isEqualToNumber:@([UnorderedListStyle getType])] ||
+         [styleType isEqualToNumber:@([OrderedListStyle getType])] ||
+         [styleType isEqualToNumber:@([CheckboxListStyle getType])];
+}
+
+static void EnrichedHtmlApplyPendingStyles(NSArray *pendingEntries) {
+  for (NSArray *entry in pendingEntries) {
+    StyleBase *style = entry[0];
+    NSRange adjustedStyleRange = [((NSValue *)entry[1]) rangeValue];
+    [style applyStyling:adjustedStyleRange];
+  }
+}
+
 - (instancetype)initWithView:(EnrichedTextView *)view {
   self = [super init];
   _view = view;
@@ -63,11 +86,16 @@
   // Each entry is @[style, adjustedRange].
   NSMutableArray *pendingInlineApply = [NSMutableArray array];
   NSMutableArray *pendingInlineCodeApply = [NSMutableArray array];
+  NSMutableArray *pendingBlockQuoteApply = [NSMutableArray array];
+  NSMutableArray *pendingListApply = [NSMutableArray array];
+  NSMutableArray *pendingCodeBlockApply = [NSMutableArray array];
   NSMutableArray *pendingHeadingApply = [NSMutableArray array];
+  NSMutableArray *pendingParagraphApply = [NSMutableArray array];
 
-  // Paragraph styles call applyStyling: immediately; inline styles
-  // defer it so that paragraph visual attributes are already in
-  // place when inline styles override them.
+  // First add all style metadata, then apply visual paragraph styling in a
+  // deterministic order. Nested quote/list/code paragraphs can share the same
+  // paragraph style, so applying visuals as parser entries arrive lets one
+  // paragraph style flatten another.
   for (NSArray *arr in processedStyles) {
     NSNumber *styleType = (NSNumber *)arr[0];
     StylePair *stylePair = (StylePair *)arr[1];
@@ -163,19 +191,21 @@
     NSRange adjustedStyleRange = NSMakeRange(
         styleRange.location, styleRange.length + (NSUInteger)MAX(0LL, delta));
 
-    BOOL isHeadingStyle = [styleType isEqualToNumber:@([H1Style getType])] ||
-                          [styleType isEqualToNumber:@([H2Style getType])] ||
-                          [styleType isEqualToNumber:@([H3Style getType])] ||
-                          [styleType isEqualToNumber:@([H4Style getType])] ||
-                          [styleType isEqualToNumber:@([H5Style getType])] ||
-                          [styleType isEqualToNumber:@([H6Style getType])];
-
     if ([style isParagraph]) {
-      if (isHeadingStyle) {
+      NSRange paragraphApplyRange = [style actualUsedRange:adjustedStyleRange];
+      NSArray *pendingEntry =
+          @[ style, [NSValue valueWithRange:paragraphApplyRange] ];
+      if ([styleType isEqualToNumber:@([BlockQuoteStyle getType])]) {
+        [pendingBlockQuoteApply addObject:pendingEntry];
+      } else if (EnrichedHtmlStyleTypeIsList(styleType)) {
+        [pendingListApply addObject:pendingEntry];
+      } else if ([styleType isEqualToNumber:@([CodeBlockStyle getType])]) {
+        [pendingCodeBlockApply addObject:pendingEntry];
+      } else if (EnrichedHtmlStyleTypeIsHeading(styleType)) {
         [pendingHeadingApply
-            addObject:@[ style, [NSValue valueWithRange:adjustedStyleRange] ]];
+            addObject:@[ style, [NSValue valueWithRange:paragraphApplyRange] ]];
       } else {
-        [style applyStyling:adjustedStyleRange];
+        [pendingParagraphApply addObject:pendingEntry];
       }
     } else {
       NSArray *pendingEntry =
@@ -194,13 +224,14 @@
     }
   }
 
-  // Headings apply after paragraph container styles so they can react to
-  // context such as headings nested inside list items or blockquotes.
-  for (NSArray *entry in pendingHeadingApply) {
-    StyleBase *style = entry[0];
-    NSRange adjustedStyleRange = [((NSValue *)entry[1]) rangeValue];
-    [style applyStyling:adjustedStyleRange];
-  }
+  // Blockquote color/layout applies before nested list/code layout so those
+  // styles can decide the final paragraph indentation. Headings apply after
+  // paragraph containers so they can react to list/quote context.
+  EnrichedHtmlApplyPendingStyles(pendingBlockQuoteApply);
+  EnrichedHtmlApplyPendingStyles(pendingListApply);
+  EnrichedHtmlApplyPendingStyles(pendingCodeBlockApply);
+  EnrichedHtmlApplyPendingStyles(pendingParagraphApply);
+  EnrichedHtmlApplyPendingStyles(pendingHeadingApply);
 
   // Apply visual styling for inline styles. Inline code runs last so its
   // foreground and background take precedence over link styling, matching the

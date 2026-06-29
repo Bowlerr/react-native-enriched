@@ -67,12 +67,14 @@ static NSInteger EnrichedParagraphBlockQuoteLevel(NSParagraphStyle *pStyle) {
   return level;
 }
 
-static NSString *EnrichedListMarkerFromStylePair(StylePair *pair,
-                                                 NSString *baseValue) {
+static NSArray<NSString *> *
+EnrichedListMarkersFromStylePair(StylePair *pair, NSString *baseValue) {
+  NSMutableArray<NSString *> *markers = [[NSMutableArray alloc] init];
+
   if ([pair.styleValue isKindOfClass:[NSString class]]) {
     NSString *markerFormat = (NSString *)pair.styleValue;
     if (EnrichedListMarkerMatches(markerFormat, baseValue)) {
-      return markerFormat;
+      [markers addObject:markerFormat];
     }
   }
 
@@ -81,12 +83,15 @@ static NSString *EnrichedListMarkerFromStylePair(StylePair *pair,
     for (NSTextList *textList in pStyle.textLists) {
       NSString *markerFormat = textList.markerFormat;
       if (EnrichedListMarkerMatches(markerFormat, baseValue)) {
-        return markerFormat;
+        [markers addObject:markerFormat];
       }
     }
   }
 
-  return baseValue;
+  if (markers.count == 0) {
+    [markers addObject:baseValue];
+  }
+  return markers;
 }
 
 @implementation UnorderedListStyle
@@ -150,9 +155,11 @@ static NSString *EnrichedListMarkerFromStylePair(StylePair *pair,
 
 - (void)reapplyFromStylePair:(StylePair *)pair {
   NSRange range = [pair.rangeValue rangeValue];
-  NSString *markerFormat =
-      EnrichedListMarkerFromStylePair(pair, [self getValue]);
-  [self add:range withValue:markerFormat withTyping:NO withDirtyRange:NO];
+  NSArray<NSString *> *markerFormats =
+      EnrichedListMarkersFromStylePair(pair, [self getValue]);
+  for (NSString *markerFormat in markerFormats) {
+    [self add:range withValue:markerFormat withTyping:NO withDirtyRange:NO];
+  }
 }
 
 - (BOOL)tryHandlingListShorcutInRange:(NSRange)range

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, Text, Pressable } from 'react-native';
 import { EnrichedTextInput } from 'react-native-enriched';
 import { Button } from '../components/Button';
 import { Toolbar } from '../components/Toolbar';
@@ -13,12 +13,17 @@ import {
   htmlStyle,
   ANDROID_EXPERIMENTAL_SYNCHRONOUS_EVENTS,
 } from '../constants/editorConfig';
-import { STRESS_TEST_HTML } from '../constants/stressTestHtml';
+import {
+  INPUT_HTML_EXAMPLES,
+  type InputExample,
+} from '../constants/inputExamples';
 
 interface TestScreenProps {
   onSwitch: () => void;
   onSwitchEnrichedText: () => void;
 }
+
+const DEFAULT_INPUT_EXAMPLE = INPUT_HTML_EXAMPLES[0] as InputExample;
 
 export function TestScreen({
   onSwitch,
@@ -26,6 +31,19 @@ export function TestScreen({
 }: TestScreenProps) {
   const editor = useEditorState();
   const [sizeMode, setSizeMode] = useState<'base' | 'max'>('base');
+  const [isExampleDropdownOpen, setIsExampleDropdownOpen] = useState(false);
+  const [selectedExampleKey, setSelectedExampleKey] = useState(
+    DEFAULT_INPUT_EXAMPLE.key
+  );
+  const selectedExample =
+    INPUT_HTML_EXAMPLES.find((example) => example.key === selectedExampleKey) ??
+    DEFAULT_INPUT_EXAMPLE;
+
+  const setExample = (example: InputExample = selectedExample) => {
+    setSelectedExampleKey(example.key);
+    setIsExampleDropdownOpen(false);
+    editor.setValue(example.html);
+  };
 
   return (
     <>
@@ -106,6 +124,58 @@ export function TestScreen({
             layout="grid"
           />
         </View>
+        <View style={styles.exampleDropdownContainer}>
+          <Text style={styles.exampleLabel} testID="input-example-current">
+            example: {selectedExample.title}
+          </Text>
+          <Pressable
+            onPress={() => setIsExampleDropdownOpen((isOpen) => !isOpen)}
+            style={({ pressed }) => [
+              styles.exampleDropdownButton,
+              pressed && styles.exampleDropdownButtonPressed,
+            ]}
+            testID="input-example-dropdown-button"
+          >
+            <Text style={styles.exampleDropdownButtonText}>
+              {selectedExample.title}
+            </Text>
+            <Text style={styles.exampleDropdownIndicator}>
+              {isExampleDropdownOpen ? 'Close' : 'Open'}
+            </Text>
+          </Pressable>
+          {isExampleDropdownOpen && (
+            <View
+              style={styles.exampleDropdownMenu}
+              testID="input-example-dropdown-menu"
+            >
+              {INPUT_HTML_EXAMPLES.map((example) => {
+                const isSelected = example.key === selectedExample.key;
+
+                return (
+                  <Pressable
+                    key={example.key}
+                    onPress={() => setExample(example)}
+                    style={({ pressed }) => [
+                      styles.exampleDropdownOption,
+                      isSelected && styles.exampleDropdownOptionSelected,
+                      pressed && styles.exampleDropdownOptionPressed,
+                    ]}
+                    testID={`input-example-${example.key}-option`}
+                  >
+                    <Text
+                      style={[
+                        styles.exampleDropdownOptionText,
+                        isSelected && styles.exampleDropdownOptionTextSelected,
+                      ]}
+                    >
+                      {example.title}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </View>
         <View style={styles.buttonRow}>
           <Button
             title="Set Value"
@@ -115,7 +185,7 @@ export function TestScreen({
           />
           <Button
             title="Set Example"
-            onPress={() => editor.setValue(STRESS_TEST_HTML)}
+            onPress={() => setExample()}
             style={styles.rowButton}
             testID="set-example-value-button"
           />
@@ -207,6 +277,72 @@ const styles = StyleSheet.create({
   },
   rowButton: {
     flex: 1,
+  },
+  exampleDropdownContainer: {
+    width: '100%',
+    marginTop: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'gray',
+    borderRadius: 8,
+    padding: 12,
+  },
+  exampleLabel: {
+    color: 'black',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  exampleDropdownButton: {
+    marginTop: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'gray',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: 'white',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  exampleDropdownButtonPressed: {
+    opacity: 0.85,
+  },
+  exampleDropdownButtonText: {
+    flex: 1,
+    color: 'black',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  exampleDropdownIndicator: {
+    color: 'rgb(0, 26, 114)',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  exampleDropdownMenu: {
+    marginTop: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'gray',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  exampleDropdownOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: 'white',
+  },
+  exampleDropdownOptionSelected: {
+    backgroundColor: 'rgba(0, 26, 114, 0.08)',
+  },
+  exampleDropdownOptionPressed: {
+    opacity: 0.85,
+  },
+  exampleDropdownOptionText: {
+    color: 'black',
+    fontSize: 16,
+  },
+  exampleDropdownOptionTextSelected: {
+    color: 'rgb(0, 26, 114)',
+    fontWeight: '700',
   },
   editorInput: {
     marginTop: 24,

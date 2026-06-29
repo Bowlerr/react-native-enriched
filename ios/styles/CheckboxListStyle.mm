@@ -19,6 +19,30 @@ static BOOL EnrichedCheckboxMarkerIsChecked(NSString *markerFormat) {
          [markerFormat hasPrefix:@"EnrichedCheckbox1"];
 }
 
+static NSArray<NSString *> *
+EnrichedCheckboxMarkersFromStylePair(StylePair *pair) {
+  NSMutableArray<NSString *> *markers = [[NSMutableArray alloc] init];
+
+  if ([pair.styleValue isKindOfClass:[NSString class]] &&
+      EnrichedCheckboxMarkerMatches((NSString *)pair.styleValue)) {
+    [markers addObject:(NSString *)pair.styleValue];
+  }
+
+  NSParagraphStyle *savedPStyle =
+      [pair.styleValue isKindOfClass:[NSParagraphStyle class]]
+          ? (NSParagraphStyle *)pair.styleValue
+          : nil;
+  if (savedPStyle != nil) {
+    for (NSTextList *textList in savedPStyle.textLists) {
+      if (EnrichedCheckboxMarkerMatches(textList.markerFormat)) {
+        [markers addObject:textList.markerFormat];
+      }
+    }
+  }
+
+  return markers;
+}
+
 static NSInteger EnrichedCheckboxLevelFromMarker(NSString *markerFormat) {
   if (!EnrichedCheckboxMarkerMatches(markerFormat)) {
     return -1;
@@ -197,34 +221,52 @@ EnrichedCheckboxParagraphBlockQuoteLevel(NSParagraphStyle *pStyle) {
 // marker format from the saved StylePair
 - (void)reapplyFromStylePair:(StylePair *)pair {
   NSRange range = [pair.rangeValue rangeValue];
-  if ([pair.styleValue isKindOfClass:[NSString class]] &&
-      EnrichedCheckboxMarkerMatches((NSString *)pair.styleValue)) {
-    [self add:range
-             withValue:(NSString *)pair.styleValue
-            withTyping:NO
-        withDirtyRange:NO];
+  NSArray<NSString *> *markerFormats =
+      EnrichedCheckboxMarkersFromStylePair(pair);
+
+  if (markerFormats.count == 0) {
+    [self addWithChecked:NO range:range withTyping:NO withDirtyRange:NO];
     return;
   }
 
-  NSParagraphStyle *savedPStyle =
-      [pair.styleValue isKindOfClass:[NSParagraphStyle class]]
-          ? (NSParagraphStyle *)pair.styleValue
-          : nil;
-  NSString *markerFormat = nil;
-  if (savedPStyle != nil) {
-    for (NSTextList *textList in savedPStyle.textLists) {
-      if (EnrichedCheckboxMarkerMatches(textList.markerFormat)) {
-        markerFormat = textList.markerFormat;
-        break;
-      }
-    }
-  }
+  [self.host.textView.textStorage
+      enumerateAttribute:NSParagraphStyleAttributeName
+                 inRange:range
+                 options:0
+              usingBlock:^(id _Nullable existingValue, NSRange subRange,
+                           BOOL *_Nonnull stop) {
+                NSMutableParagraphStyle *pStyle =
+                    [(NSParagraphStyle *)existingValue mutableCopy];
+                if (pStyle == nil) {
+                  return;
+                }
 
-  if (markerFormat != nil) {
-    [self add:range withValue:markerFormat withTyping:NO withDirtyRange:NO];
-  } else {
-    [self addWithChecked:NO range:range withTyping:NO withDirtyRange:NO];
-  }
+                NSMutableArray<NSTextList *> *textLists =
+                    [pStyle.textLists mutableCopy];
+                if (textLists == nil) {
+                  textLists = [[NSMutableArray alloc] init];
+                }
+
+                NSIndexSet *matchingIndexes = [textLists
+                    indexesOfObjectsPassingTest:^BOOL(
+                        NSTextList *textList, NSUInteger idx, BOOL *stop) {
+                      return EnrichedCheckboxMarkerMatches(
+                          textList.markerFormat);
+                    }];
+                [textLists removeObjectsAtIndexes:matchingIndexes];
+
+                for (NSString *markerFormat in markerFormats) {
+                  [textLists addObject:[[NSTextList alloc]
+                                           initWithMarkerFormat:markerFormat
+                                                        options:0]];
+                }
+
+                pStyle.textLists = textLists;
+                [self.host.textView.textStorage
+                    addAttribute:NSParagraphStyleAttributeName
+                           value:pStyle
+                           range:subRange];
+              }];
 }
 
 - (void)toggleCheckedAt:(NSUInteger)location

@@ -42,9 +42,8 @@ open class EnrichedBlockQuoteSpan(
     p.style = Paint.Style.FILL
     p.color = enrichedStyle.blockquoteBorderColor
     val stripeX =
-      x +
+      x -
         dir * parentListContentIndent(text, start, end) -
-        dir * nestedListContentIndent(text, start, end) -
         dir * nestedCodeBlockContentOffset(text, start, end)
     c.drawRect(stripeX.toFloat(), top.toFloat(), stripeX + dir * enrichedStyle.blockquoteStripeWidth.toFloat(), bottom.toFloat(), p)
     p.style = style
@@ -55,13 +54,19 @@ open class EnrichedBlockQuoteSpan(
     text: CharSequence?,
     start: Int,
     end: Int,
-  ): Int = listContentIndent(text, start, end) { listStart, blockquoteStart -> listStart < blockquoteStart }
+  ): Int {
+    val spannedText = text as? Spanned ?: return 0
+    val blockquoteStart = spannedText.getSpanStart(this)
+    if (blockquoteStart < 0) {
+      return 0
+    }
 
-  private fun nestedListContentIndent(
-    text: CharSequence?,
-    start: Int,
-    end: Int,
-  ): Int = listContentIndent(text, start, end) { listStart, blockquoteStart -> listStart >= blockquoteStart }
+    return spannedText
+      .getSpans(start, end, EnrichedListSpan::class.java)
+      .filter { listSpan -> spannedText.getSpanStart(listSpan) < blockquoteStart }
+      .maxOfOrNull { listSpan -> listContentIndent(listSpan) }
+      ?: 0
+  }
 
   private fun nestedCodeBlockContentOffset(
     text: CharSequence?,
@@ -83,25 +88,6 @@ open class EnrichedBlockQuoteSpan(
     }
 
     return BLOCKQUOTE_CODE_BLOCK_LEADING_MARGIN
-  }
-
-  private fun listContentIndent(
-    text: CharSequence?,
-    start: Int,
-    end: Int,
-    matchesListPosition: (listStart: Int, blockquoteStart: Int) -> Boolean,
-  ): Int {
-    val spannedText = text as? Spanned ?: return 0
-    val blockquoteStart = spannedText.getSpanStart(this)
-    if (blockquoteStart < 0) {
-      return 0
-    }
-
-    return spannedText
-      .getSpans(start, end, EnrichedListSpan::class.java)
-      .filter { listSpan -> matchesListPosition(spannedText.getSpanStart(listSpan), blockquoteStart) }
-      .maxOfOrNull { listSpan -> listContentIndent(listSpan) }
-      ?: 0
   }
 
   private fun listContentIndent(listSpan: EnrichedListSpan): Int {

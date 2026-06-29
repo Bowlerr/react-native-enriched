@@ -354,6 +354,22 @@ TEST(GumboParserTest, EnrichedTagRemappings) {
   EXPECT_EQ(GumboParser::normalizeHtml("<b>x</b>"), "<b>x</b>");
 }
 
+TEST(GumboParserTest, InlineCodeDoesNotAbsorbAdjacentPunctuation) {
+  EXPECT_EQ(GumboParser::normalizeHtml(
+                "<p>Text before <code>inline code</code>, and after.</p>"),
+            "<p>Text before <code>inline code</code>, and after.</p>");
+  EXPECT_EQ(GumboParser::normalizeHtml(
+                "<p>Text before <code>inline code</code>.</p>"),
+            "<p>Text before <code>inline code</code>.</p>");
+  EXPECT_EQ(GumboParser::normalizeHtml(
+                "<blockquote><p>Quote with <b>bold</b>, <code>inline "
+                "code</code>, and <a href=\"https://example.com\">link "
+                "text</a>.</p></blockquote>"),
+            "<blockquote><p>Quote with <b>bold</b>, <code>inline code</code>, "
+            "and <a href=\"https://example.com\">link "
+            "text</a>.</p></blockquote>");
+}
+
 TEST(GumboParserTest, DivRemappings) {
   EXPECT_EQ(GumboParser::normalizeHtml("<div>x</div>"), "<p>x</p>");
   EXPECT_EQ(GumboParser::normalizeHtml("<div><p>x</p></div>"), "<p>x</p>");
