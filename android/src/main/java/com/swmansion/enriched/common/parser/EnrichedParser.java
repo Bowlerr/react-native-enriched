@@ -8,18 +8,21 @@ import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.style.AlignmentSpan;
 import android.text.style.LeadingMarginSpan;
+import android.text.style.LineHeightSpan;
 import android.text.style.ParagraphStyle;
 import com.swmansion.enriched.common.EnrichedConstants;
 import com.swmansion.enriched.common.spans.EnrichedBlockQuoteSpan;
 import com.swmansion.enriched.common.spans.EnrichedBoldSpan;
 import com.swmansion.enriched.common.spans.EnrichedCheckboxListSpan;
 import com.swmansion.enriched.common.spans.EnrichedCodeBlockSpan;
+import com.swmansion.enriched.common.spans.EnrichedCollapsedLineHeightSpan;
 import com.swmansion.enriched.common.spans.EnrichedH1Span;
 import com.swmansion.enriched.common.spans.EnrichedH2Span;
 import com.swmansion.enriched.common.spans.EnrichedH3Span;
 import com.swmansion.enriched.common.spans.EnrichedH4Span;
 import com.swmansion.enriched.common.spans.EnrichedH5Span;
 import com.swmansion.enriched.common.spans.EnrichedH6Span;
+import com.swmansion.enriched.common.spans.EnrichedHeadingStyleSpan;
 import com.swmansion.enriched.common.spans.EnrichedImageSpan;
 import com.swmansion.enriched.common.spans.EnrichedInlineCodeSpan;
 import com.swmansion.enriched.common.spans.EnrichedItalicSpan;
@@ -30,6 +33,7 @@ import com.swmansion.enriched.common.spans.EnrichedStrikeThroughSpan;
 import com.swmansion.enriched.common.spans.EnrichedUnderlineSpan;
 import com.swmansion.enriched.common.spans.EnrichedUnorderedListSpan;
 import com.swmansion.enriched.common.spans.interfaces.EnrichedBlockSpan;
+import com.swmansion.enriched.common.spans.interfaces.EnrichedCollapsibleLayoutSpan;
 import com.swmansion.enriched.common.spans.interfaces.EnrichedInlineSpan;
 import com.swmansion.enriched.common.spans.interfaces.EnrichedListSpan;
 import com.swmansion.enriched.common.spans.interfaces.EnrichedParagraphSpan;
@@ -626,10 +630,12 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
   private final String mSource;
   private final XMLReader mReader;
   private final SpannableStringBuilder mSpannableStringBuilder;
+  private static final int CONTINUATION_MARKER_START = -2;
   private final ArrayDeque<ListContext> mListStack = new ArrayDeque<>();
   private static Boolean isEmptyTag = false;
   private int mCodeBlockDepth = 0;
   private int mBlockQuoteDepth = 0;
+  private boolean mHasPendingWhitespace = false;
 
   public HtmlToSpannedConverter(
       String source, T style, Parser parser, EnrichedSpanFactory<T> spanFactory) {
@@ -670,17 +676,17 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
         // TODO: verify if Spannable.SPAN_EXCLUSIVE_EXCLUSIVE does not break anything.
         // Previously it was SPAN_PARAGRAPH. I've changed that in order to fix ranges for list
         // items.
-        int flags =
-            obj[i] instanceof EnrichedBlockSpan || obj[i] instanceof AlignmentSpan
-                ? Spannable.SPAN_INCLUSIVE_EXCLUSIVE
-                : Spannable.SPAN_EXCLUSIVE_EXCLUSIVE;
+        int flags = paragraphSpanBaseFlags(obj[i]);
         mSpannableStringBuilder.setSpan(obj[i], start, end, getSpanFlags(obj[i], flags));
       }
     }
 
     trimParentListSpansFromNestedParagraphs();
 
-    // Assign zero-width space character to the proper spans.
+    // Assign zero-width space characters only to styled paragraphs that need a
+    // placeholder. iOS removes ZWS from non-empty paragraphs and only inserts it
+    // for empty styled lines; doing the same here keeps invisible text from
+    // affecting line metrics in headings/lists/quotes.
     EnrichedZeroWidthSpaceSpan[] zeroWidthSpaceSpans =
         mSpannableStringBuilder.getSpans(
             0, mSpannableStringBuilder.length(), EnrichedZeroWidthSpaceSpan.class);
@@ -688,10 +694,21 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       int start = mSpannableStringBuilder.getSpanStart(zeroWidthSpaceSpan);
       int end = mSpannableStringBuilder.getSpanEnd(zeroWidthSpaceSpan);
 
-      if (mSpannableStringBuilder.charAt(start) != EnrichedConstants.ZWS) {
-        // Insert zero-width space character at the start if it's not already present.
+      if (start < 0 || end < 0 || start > end) {
+        continue;
+      }
+
+      boolean hasVisibleContent =
+          firstVisibleContentIndex(mSpannableStringBuilder, start, end) >= 0;
+      if (hasVisibleContent) {
+        removeLeadingZeroWidthSpaceIfPresent(start, end);
+        continue;
+      }
+
+      if (start == mSpannableStringBuilder.length()
+          || mSpannableStringBuilder.charAt(start) != EnrichedConstants.ZWS) {
         mSpannableStringBuilder.insert(start, EnrichedConstants.ZWS_STRING);
-        end++; // Adjust end position due to insertion.
+        end++;
       }
 
       mSpannableStringBuilder.removeSpan(zeroWidthSpaceSpan);
@@ -700,8 +717,41 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     }
 
     trimParentListSpansFromNestedParagraphs();
+    assignListMarkerStarts();
+    collapseInvisibleLayoutParagraphs();
 
     return mSpannableStringBuilder;
+  }
+
+  private void removeLeadingZeroWidthSpaceIfPresent(int start, int end) {
+    if (start >= end || start >= mSpannableStringBuilder.length()) {
+      return;
+    }
+
+    if (mSpannableStringBuilder.charAt(start) == EnrichedConstants.ZWS) {
+      mSpannableStringBuilder.delete(start, start + 1);
+    }
+  }
+
+  private void assignListMarkerStarts() {
+    EnrichedListSpan[] listSpans =
+        mSpannableStringBuilder.getSpans(
+            0, mSpannableStringBuilder.length(), EnrichedListSpan.class);
+
+    for (EnrichedListSpan span : listSpans) {
+      if (span.getMarkerStart() == CONTINUATION_MARKER_START) {
+        continue;
+      }
+
+      int spanStart = mSpannableStringBuilder.getSpanStart(span);
+      int spanEnd = mSpannableStringBuilder.getSpanEnd(span);
+      if (spanStart < 0 || spanEnd <= spanStart) {
+        span.setMarkerStart(-1);
+        continue;
+      }
+
+      span.setMarkerStart(firstVisibleContentIndex(mSpannableStringBuilder, spanStart, spanEnd));
+    }
   }
 
   private void trimParentListSpansFromNestedParagraphs() {
@@ -721,6 +771,44 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       }
       paragraphStart = paragraphEnd + 1;
     }
+  }
+
+  private void collapseInvisibleLayoutParagraphs() {
+    int textLength = mSpannableStringBuilder.length();
+    int paragraphStart = 0;
+
+    while (paragraphStart < textLength) {
+      int paragraphBreak = TextUtils.indexOf(mSpannableStringBuilder, '\n', paragraphStart);
+      int paragraphEnd = paragraphBreak < 0 ? textLength : paragraphBreak;
+      int paragraphRangeEnd = paragraphBreak < 0 ? paragraphEnd : paragraphEnd + 1;
+
+      if (paragraphRangeEnd > paragraphStart
+          && firstVisibleContentIndex(mSpannableStringBuilder, paragraphStart, paragraphRangeEnd)
+              < 0
+          && hasCollapsibleLayoutSpan(paragraphStart, paragraphRangeEnd)) {
+        mSpannableStringBuilder.setSpan(
+            new EnrichedCollapsedLineHeightSpan(),
+            paragraphStart,
+            paragraphRangeEnd,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE | (4 << Spanned.SPAN_PRIORITY_SHIFT));
+      }
+
+      if (paragraphBreak < 0) {
+        break;
+      }
+      paragraphStart = paragraphRangeEnd;
+    }
+  }
+
+  private boolean hasCollapsibleLayoutSpan(int start, int end) {
+    EnrichedCollapsibleLayoutSpan[] spans =
+        mSpannableStringBuilder.getSpans(start, end, EnrichedCollapsibleLayoutSpan.class);
+    for (EnrichedCollapsibleLayoutSpan span : spans) {
+      if (span.getCollapsesInvisibleContent()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private void trimParentListSpansFromParagraph(int paragraphStart, int paragraphEnd) {
@@ -774,14 +862,16 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     }
 
     if (spanStart < beforeEnd) {
-      mSpannableStringBuilder.setSpan(copyListSpan(span), spanStart, beforeEnd, flags);
+      mSpannableStringBuilder.setSpan(
+          copyListSpan(span, spanStart, beforeEnd), spanStart, beforeEnd, flags);
     }
     if (afterStart < spanEnd) {
-      mSpannableStringBuilder.setSpan(copyListSpan(span), afterStart, spanEnd, flags);
+      mSpannableStringBuilder.setSpan(
+          copyListSpan(span, afterStart, spanEnd), afterStart, spanEnd, flags);
     }
   }
 
-  private EnrichedListSpan copyListSpan(EnrichedListSpan span) {
+  private EnrichedListSpan copyListSpan(EnrichedListSpan span, int copyStart, int copyEnd) {
     EnrichedListSpan copy;
 
     if (span instanceof EnrichedOrderedListSpan) {
@@ -796,6 +886,15 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     }
 
     copy.setLevel(span.getLevel());
+    copy.setEnclosingBlockQuoteDepth(span.getEnclosingBlockQuoteDepth());
+    int markerStart = span.getMarkerStart();
+    if (markerStart >= copyStart && markerStart < copyEnd) {
+      copy.setMarkerStart(markerStart);
+    } else if (markerStart >= 0 || markerStart == CONTINUATION_MARKER_START) {
+      copy.setMarkerStart(CONTINUATION_MARKER_START);
+    } else {
+      copy.setMarkerStart(-1);
+    }
     return copy;
   }
 
@@ -804,16 +903,20 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       // We don't need to handle this. TagSoup will ensure that there's a </br> for each <br>
       // so we can safely emit the linebreaks when we handle the close tag.
     } else if (tag.equalsIgnoreCase("p")) {
+      dropPendingWhitespace();
       isEmptyTag = true;
       startBlockElement(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("ul")) {
+      dropPendingWhitespace();
       String dataType = attributes.getValue("", "data-type");
       mListStack.addLast(new ListContext(isCheckboxListType(dataType) ? "checked" : "unordered"));
       startBlockElement(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("ol")) {
+      dropPendingWhitespace();
       mListStack.addLast(new ListContext("ordered"));
       startBlockElement(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("li")) {
+      dropPendingWhitespace();
       isEmptyTag = true;
       startLi(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("b")) {
@@ -821,10 +924,12 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     } else if (tag.equalsIgnoreCase("i")) {
       start(mSpannableStringBuilder, new Italic());
     } else if (tag.equalsIgnoreCase("blockquote")) {
+      dropPendingWhitespace();
       isEmptyTag = true;
       mBlockQuoteDepth++;
       startBlockquote(mSpannableStringBuilder, attributes);
     } else if (tag.equalsIgnoreCase("codeblock")) {
+      dropPendingWhitespace();
       isEmptyTag = true;
       mCodeBlockDepth++;
       startCodeBlock(
@@ -841,18 +946,25 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     } else if (tag.equalsIgnoreCase("strike")) {
       start(mSpannableStringBuilder, new Strikethrough());
     } else if (tag.equalsIgnoreCase("h1")) {
+      dropPendingWhitespace();
       startHeading(mSpannableStringBuilder, 1, attributes);
     } else if (tag.equalsIgnoreCase("h2")) {
+      dropPendingWhitespace();
       startHeading(mSpannableStringBuilder, 2, attributes);
     } else if (tag.equalsIgnoreCase("h3")) {
+      dropPendingWhitespace();
       startHeading(mSpannableStringBuilder, 3, attributes);
     } else if (tag.equalsIgnoreCase("h4")) {
+      dropPendingWhitespace();
       startHeading(mSpannableStringBuilder, 4, attributes);
     } else if (tag.equalsIgnoreCase("h5")) {
+      dropPendingWhitespace();
       startHeading(mSpannableStringBuilder, 5, attributes);
     } else if (tag.equalsIgnoreCase("h6")) {
+      dropPendingWhitespace();
       startHeading(mSpannableStringBuilder, 6, attributes);
     } else if (tag.equalsIgnoreCase("img")) {
+      flushPendingWhitespace();
       // Image content means the current tag is not empty (e.g. <li><img .../></li>).
       isEmptyTag = false;
       startImg(mSpannableStringBuilder, attributes, mSpanFactory);
@@ -865,31 +977,38 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
 
   private void handleEndTag(String tag) {
     if (tag.equalsIgnoreCase("br")) {
+      dropPendingWhitespace();
       handleBr(mSpannableStringBuilder);
     } else if (tag.equalsIgnoreCase("p")) {
+      dropPendingWhitespace();
       endBlockElement(mSpannableStringBuilder);
     } else if (tag.equalsIgnoreCase("ul")) {
+      dropPendingWhitespace();
       endBlockElement(mSpannableStringBuilder);
       if (!mListStack.isEmpty()) {
         mListStack.removeLast();
       }
     } else if (tag.equalsIgnoreCase("ol")) {
+      dropPendingWhitespace();
       endBlockElement(mSpannableStringBuilder);
       if (!mListStack.isEmpty()) {
         mListStack.removeLast();
       }
     } else if (tag.equalsIgnoreCase("li")) {
+      dropPendingWhitespace();
       endLi(mSpannableStringBuilder, mStyle, mSpanFactory);
     } else if (tag.equalsIgnoreCase("b")) {
       end(mSpannableStringBuilder, Bold.class, mSpanFactory.createBoldSpan(mStyle));
     } else if (tag.equalsIgnoreCase("i")) {
       end(mSpannableStringBuilder, Italic.class, mSpanFactory.createItalicSpan(mStyle));
     } else if (tag.equalsIgnoreCase("blockquote")) {
+      dropPendingWhitespace();
       endBlockquote(mSpannableStringBuilder, mStyle, mSpanFactory);
       if (mBlockQuoteDepth > 0) {
         mBlockQuoteDepth--;
       }
     } else if (tag.equalsIgnoreCase("codeblock")) {
+      dropPendingWhitespace();
       endCodeBlock(mSpannableStringBuilder, mStyle, mSpanFactory);
       if (mCodeBlockDepth > 0) {
         mCodeBlockDepth--;
@@ -904,16 +1023,22 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
           Strikethrough.class,
           mSpanFactory.createStrikeThroughSpan(mStyle));
     } else if (tag.equalsIgnoreCase("h1")) {
+      dropPendingWhitespace();
       endHeading(mSpannableStringBuilder, mStyle, mSpanFactory, 1);
     } else if (tag.equalsIgnoreCase("h2")) {
+      dropPendingWhitespace();
       endHeading(mSpannableStringBuilder, mStyle, mSpanFactory, 2);
     } else if (tag.equalsIgnoreCase("h3")) {
+      dropPendingWhitespace();
       endHeading(mSpannableStringBuilder, mStyle, mSpanFactory, 3);
     } else if (tag.equalsIgnoreCase("h4")) {
+      dropPendingWhitespace();
       endHeading(mSpannableStringBuilder, mStyle, mSpanFactory, 4);
     } else if (tag.equalsIgnoreCase("h5")) {
+      dropPendingWhitespace();
       endHeading(mSpannableStringBuilder, mStyle, mSpanFactory, 5);
     } else if (tag.equalsIgnoreCase("h6")) {
+      dropPendingWhitespace();
       endHeading(mSpannableStringBuilder, mStyle, mSpanFactory, 6);
     } else if (tag.equalsIgnoreCase("code")) {
       end(mSpannableStringBuilder, Code.class, mSpanFactory.createInlineCodeSpan(mStyle));
@@ -1016,6 +1141,25 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     text.append('\n');
   }
 
+  private void flushPendingWhitespace() {
+    if (!mHasPendingWhitespace) {
+      return;
+    }
+
+    int len = mSpannableStringBuilder.length();
+    if (len > 0) {
+      char previous = mSpannableStringBuilder.charAt(len - 1);
+      if (previous != ' ' && previous != '\n') {
+        mSpannableStringBuilder.append(' ');
+      }
+    }
+    mHasPendingWhitespace = false;
+  }
+
+  private void dropPendingWhitespace() {
+    mHasPendingWhitespace = false;
+  }
+
   private void startLi(Editable text, Attributes attributes) {
     startBlockElement(text, attributes);
     ListContext context = mListStack.peekLast();
@@ -1023,12 +1167,12 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
 
     if (context != null && context.mType.equals("ordered")) {
       context.mIndex++;
-      start(text, new List("ordered", context.mIndex, false, level));
+      start(text, new List("ordered", context.mIndex, false, level, mBlockQuoteDepth));
     } else if (context != null && context.mType.equals("checked")) {
       String isChecked = checkboxStateAttribute(attributes);
-      start(text, new List("checked", 0, isTruthyAttribute(isChecked), level));
+      start(text, new List("checked", 0, isTruthyAttribute(isChecked), level, mBlockQuoteDepth));
     } else {
-      start(text, new List("unordered", 0, false, level));
+      start(text, new List("unordered", 0, false, level, mBlockQuoteDepth));
     }
   }
 
@@ -1037,34 +1181,43 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
 
     List l = getLast(text, List.class);
     if (l != null) {
+      int markerStart = firstVisibleContentIndex(text, text.getSpanStart(l), text.length());
       if (l.mType.equals("ordered")) {
         EnrichedOrderedListSpan span = spanFactory.createOrderedListSpan(l.mIndex, style);
         span.setLevel(l.mLevel);
+        span.setMarkerStart(markerStart);
+        span.setEnclosingBlockQuoteDepth(l.mBlockQuoteDepth);
         setParagraphSpanFromMark(text, l, span);
       } else if (l.mType.equals("checked")) {
         EnrichedCheckboxListSpan span = spanFactory.createCheckboxListSpan(l.mChecked, style);
         span.setLevel(l.mLevel);
+        span.setMarkerStart(markerStart);
+        span.setEnclosingBlockQuoteDepth(l.mBlockQuoteDepth);
         setParagraphSpanFromMark(text, l, span);
       } else {
         EnrichedUnorderedListSpan span = spanFactory.createUnorderedListSpan(style);
         span.setLevel(l.mLevel);
+        span.setMarkerStart(markerStart);
+        span.setEnclosingBlockQuoteDepth(l.mBlockQuoteDepth);
         setParagraphSpanFromMark(text, l, span);
       }
     }
-
-    endBlockElement(text);
   }
 
   private void startBlockquote(Editable text, Attributes attributes) {
     startBlockElement(text, attributes);
-    start(text, new Blockquote());
+    start(text, new Blockquote(mBlockQuoteDepth));
   }
 
   private static <T> void endBlockquote(
       Editable text, T style, EnrichedSpanFactory<T> spanFactory) {
     endBlockElement(text);
     Blockquote last = getLast(text, Blockquote.class);
-    setParagraphSpanFromMark(text, last, spanFactory.createBlockQuoteSpan(style));
+    EnrichedBlockQuoteSpan span = spanFactory.createBlockQuoteSpan(style);
+    if (last != null) {
+      span.setQuoteDepth(last.mDepth);
+    }
+    setParagraphSpanFromMark(text, last, span);
   }
 
   private void startCodeBlock(
@@ -1171,7 +1324,43 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     int len = text.length();
     if (where != len) {
       for (Object span : spans) {
-        text.setSpan(span, where, len, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(span, where, len, getSpanFlags(span, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE));
+      }
+    }
+  }
+
+  private static boolean isInlineBoundaryWhitespace(char character) {
+    return Character.isWhitespace(character) || character == EnrichedConstants.ZWS;
+  }
+
+  private static int firstVisibleContentIndex(CharSequence text, int start, int end) {
+    int safeStart = Math.max(0, start);
+    int safeEnd = Math.min(end, text.length());
+    for (int index = safeStart; index < safeEnd; index++) {
+      char character = text.charAt(index);
+      if (character != EnrichedConstants.ZWS && !Character.isWhitespace(character)) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  private static void setInlineSpanFromMark(Spannable text, Object mark, Object... spans) {
+    int where = text.getSpanStart(mark);
+    text.removeSpan(mark);
+    int len = text.length();
+
+    while (where < len && isInlineBoundaryWhitespace(text.charAt(where))) {
+      where++;
+    }
+
+    while (len > where && isInlineBoundaryWhitespace(text.charAt(len - 1))) {
+      len--;
+    }
+
+    if (where != len) {
+      for (Object span : spans) {
+        text.setSpan(span, where, len, getSpanFlags(span, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE));
       }
     }
   }
@@ -1187,19 +1376,54 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
       len++;
     }
 
-    // Adjust the end position to exclude the newline character, if present
-    if (len > 0 && text.charAt(len - 1) == '\n') {
-      len--;
+    int paragraphEnd = len;
+    int contentEnd = len;
+
+    // Visual paragraph spans should not style the trailing newline, otherwise
+    // typing after that newline can inherit block styling. Android line-height
+    // paragraph spans do need the newline so StaticLayout applies them to the
+    // whole paragraph.
+    if (contentEnd > 0 && text.charAt(contentEnd - 1) == '\n') {
+      contentEnd--;
     }
 
-    if (where != len) {
-      for (Object span : spans) {
-        text.setSpan(span, where, len, getSpanFlags(span, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE));
+    for (Object span : spans) {
+      if (span instanceof EnrichedHeadingStyleSpan) {
+        if (where != contentEnd) {
+          text.setSpan(span, where, contentEnd, getSpanFlags(span, paragraphSpanBaseFlags(span)));
+        }
+        if (where != paragraphEnd) {
+          LineHeightSpan lineHeightSpan = ((EnrichedHeadingStyleSpan) span).createLineHeightSpan();
+          text.setSpan(
+              lineHeightSpan,
+              where,
+              paragraphEnd,
+              getSpanFlags(lineHeightSpan, paragraphSpanBaseFlags(lineHeightSpan)));
+        }
+      } else if (where != contentEnd) {
+        text.setSpan(span, where, contentEnd, getSpanFlags(span, paragraphSpanBaseFlags(span)));
       }
     }
   }
 
+  private static int paragraphSpanBaseFlags(Object span) {
+    return span instanceof EnrichedBlockSpan
+            || span instanceof EnrichedListSpan
+            || span instanceof AlignmentSpan
+            || span instanceof LineHeightSpan
+        ? Spannable.SPAN_INCLUSIVE_EXCLUSIVE
+        : Spannable.SPAN_EXCLUSIVE_EXCLUSIVE;
+  }
+
   private static int getSpanFlags(Object span, int baseFlags) {
+    if (span instanceof EnrichedInlineCodeSpan) {
+      return baseFlags | (3 << Spanned.SPAN_PRIORITY_SHIFT);
+    }
+
+    if (span instanceof EnrichedLinkSpan || span instanceof EnrichedMentionSpan) {
+      return baseFlags | (2 << Spanned.SPAN_PRIORITY_SHIFT);
+    }
+
     if (span instanceof EnrichedBlockQuoteSpan) {
       return baseFlags | (1 << Spanned.SPAN_PRIORITY_SHIFT);
     }
@@ -1219,7 +1443,7 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
   private static void end(Editable text, Class kind, Object repl) {
     Object obj = getLast(text, kind);
     if (obj != null) {
-      setSpanFromMark(text, obj, repl);
+      setInlineSpanFromMark(text, obj, repl);
     }
   }
 
@@ -1247,7 +1471,7 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     Href h = getLast(text, Href.class);
     if (h != null) {
       if (h.mHref != null) {
-        setSpanFromMark(text, h, spanFactory.createLinkSpan(h.mHref, style));
+        setInlineSpanFromMark(text, h, spanFactory.createLinkSpan(h.mHref, style));
       }
     }
   }
@@ -1274,7 +1498,7 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
     if (m == null) return;
     if (m.mText == null) return;
 
-    setSpanFromMark(
+    setInlineSpanFromMark(
         text, m, spanFactory.createMentionSpan(m.mText, m.mIndicator, m.mAttributes, style));
   }
 
@@ -1298,45 +1522,22 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
 
   public void characters(char[] ch, int start, int length) {
     if (mCodeBlockDepth > 0) {
+      dropPendingWhitespace();
       if (length > 0) isEmptyTag = false;
       mSpannableStringBuilder.append(new String(ch, start, length));
       return;
     }
 
-    StringBuilder sb = new StringBuilder();
-
-    /*
-     * Ignore whitespace that immediately follows other whitespace;
-     * newlines count as spaces.
-     */
     for (int i = 0; i < length; i++) {
       char c = ch[i + start];
       if (c == ' ' || c == '\n') {
-        char pred;
-        int len = sb.length();
-        if (len == 0) {
-          len = mSpannableStringBuilder.length();
-          if (len == 0) {
-            pred = '\n';
-          } else {
-            pred = mSpannableStringBuilder.charAt(len - 1);
-          }
-        } else {
-          pred = sb.charAt(len - 1);
-        }
-        if (pred != ' ' && pred != '\n') {
-          sb.append(' ');
-        }
+        mHasPendingWhitespace = true;
       } else {
-        sb.append(c);
+        flushPendingWhitespace();
+        isEmptyTag = false;
+        mSpannableStringBuilder.append(c);
       }
     }
-    // Only mark the tag as non-empty if content was actually appended after
-    // whitespace collapsing. A space-only list item (e.g. <li> </li>) would
-    // have its space dropped when the preceding char is a newline, leaving
-    // nothing to anchor a span — the ZWS placeholder must still be inserted.
-    if (sb.length() > 0) isEmptyTag = false;
-    mSpannableStringBuilder.append(sb);
   }
 
   public void ignorableWhitespace(char[] ch, int start, int length) {}
@@ -1405,19 +1606,27 @@ class HtmlToSpannedConverter<T> implements ContentHandler {
 
   private static class Strikethrough {}
 
-  private static class Blockquote {}
+  private static class Blockquote {
+    public int mDepth;
+
+    public Blockquote(int depth) {
+      mDepth = depth;
+    }
+  }
 
   private static class List {
     public int mIndex;
     public int mLevel;
+    public int mBlockQuoteDepth;
     public String mType;
     public boolean mChecked;
 
-    public List(String type, int index, boolean checked, int level) {
+    public List(String type, int index, boolean checked, int level, int blockQuoteDepth) {
       mType = type;
       mIndex = index;
       mChecked = checked;
       mLevel = level;
+      mBlockQuoteDepth = blockQuoteDepth;
     }
   }
 

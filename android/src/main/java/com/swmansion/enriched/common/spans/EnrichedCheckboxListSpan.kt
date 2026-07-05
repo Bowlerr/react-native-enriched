@@ -9,19 +9,30 @@ import android.text.style.LineHeightSpan
 import android.text.style.MetricAffectingSpan
 import androidx.core.graphics.withTranslation
 import com.swmansion.enriched.common.CheckboxDrawable
+import com.swmansion.enriched.common.EnrichedConstants
 import com.swmansion.enriched.common.EnrichedStyle
+import com.swmansion.enriched.common.spans.interfaces.EnrichedCollapsibleLayoutSpan
 import com.swmansion.enriched.common.spans.interfaces.EnrichedListSpan
 
 open class EnrichedCheckboxListSpan(
   open var isChecked: Boolean,
   private val enrichedStyle: EnrichedStyle,
   override var level: Int = 0,
+  override var markerStart: Int = -1,
+  override var enclosingBlockQuoteDepth: Int = 0,
 ) : MetricAffectingSpan(),
   LineHeightSpan,
   LeadingMarginSpan,
-  EnrichedListSpan {
+  EnrichedListSpan,
+  EnrichedCollapsibleLayoutSpan {
+  override val collapsesInvisibleContent = false
+
   private val checkboxDrawable =
-    CheckboxDrawable(enrichedStyle.ulCheckboxBoxSize, enrichedStyle.ulCheckboxBoxColor, isChecked).apply {
+    CheckboxDrawable(
+      enrichedStyle.ulCheckboxBoxSize,
+      enrichedStyle.ulCheckboxBoxColor,
+      isChecked,
+    ).apply {
       setBounds(0, 0, enrichedStyle.ulCheckboxBoxSize, enrichedStyle.ulCheckboxBoxSize)
     }
 
@@ -42,6 +53,11 @@ open class EnrichedCheckboxListSpan(
     v: Int,
     fm: Paint.FontMetricsInt,
   ) {
+    if (collapsesInvisibleContent && !hasVisibleContent(text, start, end)) {
+      collapseLineHeight(fm)
+      return
+    }
+
     val checkboxSize = enrichedStyle.ulCheckboxBoxSize
     val currentLineHeight = fm.descent - fm.ascent
 
@@ -74,29 +90,68 @@ open class EnrichedCheckboxListSpan(
     layout: Layout?,
   ) {
     if (shouldDrawListMarker(text, start, end, first)) {
-      checkboxDrawable.update(isChecked)
-
-      val fm = paint.fontMetricsInt
-      val textCenter = baseline + (fm.ascent + fm.descent) / 2f
-      val drawableTop = textCenter - (enrichedStyle.ulCheckboxBoxSize / 2f)
-      val continuationOffset = blockquoteContinuationOffset(text, start, end)
-
-      canvas.withTranslation(x.toFloat() + listMargin() - continuationOffset, drawableTop) {
-        checkboxDrawable.draw(this)
-      }
+      drawListMarker(
+        canvas,
+        paint,
+        x,
+        dir,
+        top,
+        baseline,
+        bottom,
+        text,
+        start,
+        end,
+        first,
+        layout,
+      )
     }
   }
 
-  private fun blockquoteContinuationOffset(
+  override fun drawListMarker(
+    canvas: Canvas,
+    paint: Paint,
+    x: Int,
+    dir: Int,
+    top: Int,
+    baseline: Int,
+    bottom: Int,
+    text: CharSequence?,
+    start: Int,
+    end: Int,
+    first: Boolean,
+    layout: Layout?,
+  ) {
+    checkboxDrawable.update(isChecked)
+
+    val fm = paint.fontMetricsInt
+    val textCenter = baseline + (fm.ascent + fm.descent) / 2f
+    val drawableTop = textCenter - (enrichedStyle.ulCheckboxBoxSize / 2f)
+
+    canvas.withTranslation(x.toFloat() + dir * listMargin(), drawableTop) {
+      checkboxDrawable.draw(this)
+    }
+  }
+
+  private fun listMargin(): Int = enrichedStyle.ulCheckboxMarginLeft * (level.coerceAtLeast(0) + 1)
+
+  private fun hasVisibleContent(
     text: CharSequence,
     start: Int,
     end: Int,
-  ): Int =
-    if (isBlockQuoteContinuationMarker(text, start, end)) {
-      enrichedStyle.blockquoteStripeWidth + enrichedStyle.blockquoteGapWidth
-    } else {
-      0
+  ): Boolean {
+    val safeEnd = end.coerceAtMost(text.length)
+    for (index in start until safeEnd) {
+      if (text[index] != EnrichedConstants.ZWS && !Character.isWhitespace(text[index])) {
+        return true
+      }
     }
+    return false
+  }
 
-  private fun listMargin(): Int = enrichedStyle.ulCheckboxMarginLeft * (level.coerceAtLeast(0) + 1)
+  private fun collapseLineHeight(fm: Paint.FontMetricsInt) {
+    fm.ascent = 0
+    fm.top = 0
+    fm.descent = 0
+    fm.bottom = 0
+  }
 }

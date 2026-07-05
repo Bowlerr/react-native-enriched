@@ -12,10 +12,58 @@
 
 @implementation HtmlParser
 
+static BOOL
+EnrichedHtmlTagRangeShouldTrimBoundaryWhitespace(NSString *tagName) {
+  return [tagName isEqualToString:@"b"] || [tagName isEqualToString:@"i"] ||
+         [tagName isEqualToString:@"u"] || [tagName isEqualToString:@"s"] ||
+         [tagName isEqualToString:@"code"] || [tagName isEqualToString:@"a"] ||
+         [tagName isEqualToString:@"mention"] ||
+         [tagName isEqualToString:@"h1"] || [tagName isEqualToString:@"h2"] ||
+         [tagName isEqualToString:@"h3"] || [tagName isEqualToString:@"h4"] ||
+         [tagName isEqualToString:@"h5"] || [tagName isEqualToString:@"h6"];
+}
+
+static BOOL EnrichedHtmlIsBoundaryWhitespace(unichar character) {
+  return [[NSCharacterSet whitespaceAndNewlineCharacterSet]
+             characterIsMember:character] ||
+         character == 0x200B;
+}
+
+static NSRange EnrichedHtmlRangeByTrimmingBoundaryWhitespace(NSString *text,
+                                                             NSRange range) {
+  if (range.location >= text.length || NSMaxRange(range) > text.length ||
+      range.length == 0) {
+    return range;
+  }
+
+  NSUInteger start = range.location;
+  NSUInteger end = NSMaxRange(range);
+
+  while (start < end &&
+         EnrichedHtmlIsBoundaryWhitespace([text characterAtIndex:start])) {
+    start++;
+  }
+
+  while (end > start &&
+         EnrichedHtmlIsBoundaryWhitespace([text characterAtIndex:end - 1])) {
+    end--;
+  }
+
+  if (start >= end) {
+    return range;
+  }
+
+  return NSMakeRange(start, end - start);
+}
+
 + (BOOL)isBlockTag:(NSString *)tagName {
   return [tagName isEqualToString:@"ul"] || [tagName isEqualToString:@"ol"] ||
          [tagName isEqualToString:@"blockquote"] ||
-         [tagName isEqualToString:@"codeblock"];
+         [tagName isEqualToString:@"codeblock"] ||
+         [tagName isEqualToString:@"p"] || [tagName isEqualToString:@"li"] ||
+         [tagName isEqualToString:@"h1"] || [tagName isEqualToString:@"h2"] ||
+         [tagName isEqualToString:@"h3"] || [tagName isEqualToString:@"h4"] ||
+         [tagName isEqualToString:@"h5"] || [tagName isEqualToString:@"h6"];
 }
 
 + (BOOL)shouldInsertLineBreakBeforeOpeningBlockTag:(NSString *)tagName
@@ -174,6 +222,20 @@
   return str;
 }
 
++ (NSString *)stringByRemovingStructuralNewlinesBeforeClosingListItems:
+    (NSString *)html {
+  NSString *str = [html copy];
+  for (NSString *closingTag in
+       @[ @"</ul>", @"</ol>", @"</blockquote>", @"</codeblock>" ]) {
+    NSString *structuralBreak =
+        [NSString stringWithFormat:@"%@\n</li>", closingTag];
+    NSString *compact = [NSString stringWithFormat:@"%@</li>", closingTag];
+    str = [str stringByReplacingOccurrencesOfString:structuralBreak
+                                         withString:compact];
+  }
+  return str;
+}
+
 #pragma mark - External HTML normalization
 
 /**
@@ -205,18 +267,16 @@
   }
 
   NSInteger tagLocation = [((NSNumber *)tagData[0]) intValue];
-  NSInteger openImageCount = [((NSNumber *)tagData[1]) intValue];
-  NSInteger currentImageCount = *precedingImageCount;
-
-  // 'plainText' doesn't contain image placeholders yet, but the final
-  // NSTextStorage will, so each image adds one character that ranges here
-  // must account for. 'openImageCount' (captured when the tag opened) shifts
-  // the start past images finalized BEFORE this tag, while the diff against
-  // 'currentImageCount' extends the length to cover images finalized INSIDE
-  // it.
-  NSRange tagRange = NSMakeRange(tagLocation + openImageCount,
-                                 (plainText.length - tagLocation) +
-                                     (currentImageCount - openImageCount));
+  // Keep parser ranges in plain-text coordinates. Image attachments are
+  // inserted later by the platform-specific HTML appliers and those appliers
+  // adjust style ranges as attachments mutate the text storage. Shifting here
+  // corrupts parser-only work such as splitting list-item ranges into
+  // paragraphs.
+  NSRange tagRange = NSMakeRange(tagLocation, plainText.length - tagLocation);
+  if (EnrichedHtmlTagRangeShouldTrimBoundaryWhitespace(tagName)) {
+    tagRange =
+        EnrichedHtmlRangeByTrimmingBoundaryWhitespace(plainText, tagRange);
+  }
 
   [tagEntry addObject:[tagName copy]];
   [tagEntry addObject:[NSValue valueWithRange:tagRange]];
@@ -552,10 +612,6 @@
                               withString:@""
                                  options:0
                                    range:NSMakeRange(0, normalized.length)];
-  [normalized replaceOccurrencesOfString:@"\uFFFC"
-                              withString:@""
-                                 options:0
-                                   range:NSMakeRange(0, normalized.length)];
   NSString *trimmed = [normalized
       stringByTrimmingCharactersInSet:[NSCharacterSet
                                           whitespaceAndNewlineCharacterSet]];
@@ -644,6 +700,33 @@
   }
 
   return NO;
+}
+
++ (NSNumber *)checkboxStatePositionInListItemRange:(NSRange)itemRange
+                                    checkboxStates:
+                                        (NSDictionary *)checkboxStates {
+  NSNumber *exactPosition = checkboxStates[@(itemRange.location)] != nil
+                                ? @(itemRange.location)
+                                : nil;
+  if (exactPosition != nil) {
+    return exactPosition;
+  }
+
+  NSUInteger itemEnd = NSMaxRange(itemRange);
+  NSNumber *firstPosition = nil;
+  for (NSNumber *key in checkboxStates) {
+    NSUInteger position = [key unsignedIntegerValue];
+    if (position < itemRange.location || position >= itemEnd) {
+      continue;
+    }
+
+    if (firstPosition == nil ||
+        position < [firstPosition unsignedIntegerValue]) {
+      firstPosition = key;
+    }
+  }
+
+  return firstPosition;
 }
 
 + (void)sortProcessedStylesByRangeContainment:
@@ -852,6 +935,11 @@
                                          inString:fixedHtml
                                           leading:YES
                                          trailing:NO];
+    fixedHtml =
+        [self stringByAddingNewlinesToOpeningTagsMatchingPattern:@"<p\\s+[^>]*>"
+                                                        inString:fixedHtml
+                                                         leading:YES
+                                                        trailing:NO];
     fixedHtml = [self stringByAddingNewlinesToTag:@"<li>"
                                          inString:fixedHtml
                                           leading:YES
@@ -924,6 +1012,9 @@
                                           leading:NO
                                          trailing:YES];
 
+    fixedHtml = [self
+        stringByRemovingStructuralNewlinesBeforeClosingListItems:fixedHtml];
+
     // this is more like a hack but for some reason the last <br> in
     // <blockquote> and <codeblock> are not properly changed into zero width
     // space so we do that manually here
@@ -969,10 +1060,14 @@
   NSInteger precedingImageCount = 0;
   NSInteger listContextId = 0;
   NSInteger blockquoteContextId = 0;
+  BOOL lastVisibleTokenWasImage = NO;
+  BOOL lastVisibleTokenWasStandaloneImage = NO;
   BOOL insideTag = NO;
   BOOL gettingTagName = NO;
   BOOL gettingTagParams = NO;
   BOOL closingTag = NO;
+  NSInteger currentTagStartIndex = -1;
+  NSInteger paragraphDepth = 0;
   NSMutableString *currentTagName =
       [[NSMutableString alloc] initWithString:@""];
   NSMutableString *currentTagParams =
@@ -990,6 +1085,7 @@
       // opening the tag, mark that we are inside and getting its name
       insideTag = YES;
       gettingTagName = YES;
+      currentTagStartIndex = i;
     } else if (currentCharacterChar == '>') {
       // finishing some tag, no longer marked as inside or getting its
       // name/params
@@ -1006,15 +1102,43 @@
                                                 1)];
         isSelfClosing = YES;
       }
+      if ([currentTagName isEqualToString:@"img"]) {
+        isSelfClosing = YES;
+      }
 
       if ([currentTagName isEqualToString:@"br"]) {
         // do nothing, we don't include these tags in styles
       } else if (!closingTag) {
         BOOL isPlainParagraph = [currentTagName isEqualToString:@"p"] &&
                                 currentTagParams.length == 0;
+        if ([currentTagName isEqualToString:@"p"]) {
+          paragraphDepth++;
+        }
 
         if (!isPlainParagraph) {
+          if ([self isBlockTag:currentTagName] && lastVisibleTokenWasImage) {
+            if ([self shouldInsertLineBreakBeforeOpeningBlockTag:@"p"
+                                                       plainText:plainText]) {
+              [plainText appendString:@"\n"];
+            }
+            lastVisibleTokenWasImage = NO;
+            lastVisibleTokenWasStandaloneImage = NO;
+          }
+
           if ([self shouldInsertLineBreakBeforeOpeningBlockTag:currentTagName
+                                                     plainText:plainText]) {
+            [plainText appendString:@"\n"];
+          }
+
+          BOOL isStandaloneImage =
+              [currentTagName isEqualToString:@"img"] && paragraphDepth == 0 &&
+              currentTagStartIndex > 0 &&
+              [[NSCharacterSet newlineCharacterSet]
+                  characterIsMember:[fixedHtml
+                                        characterAtIndex:currentTagStartIndex -
+                                                         1]];
+          if (isStandaloneImage &&
+              [self shouldInsertLineBreakBeforeOpeningBlockTag:@"p"
                                                      plainText:plainText]) {
             [plainText appendString:@"\n"];
           }
@@ -1032,9 +1156,9 @@
 
           // we finish opening tag - get its location, the current
           // precedingImageCount and optionally params and put them under tag
-          // name key in ongoingTags. Storing the open-time image count lets
-          // finalizeTagEntry: correctly shift the start and extend the length
-          // so the range covers any images finalized between open and close.
+          // name key in ongoingTags. Images occupy an object-replacement
+          // character in plainText, so later style ranges stay in parser
+          // coordinates without attachment insertion shifts.
           NSMutableArray *tagArr = [[NSMutableArray alloc] init];
           [tagArr addObject:[NSNumber numberWithInteger:plainText.length]];
           [tagArr addObject:[NSNumber numberWithInteger:precedingImageCount]];
@@ -1060,6 +1184,15 @@
             tagParams =
                 [self paramsByAppendingCurrentBlockQuoteContext:tagParams
                                                     ongoingTags:ongoingTags];
+          } else if ([currentTagName isEqualToString:@"img"] &&
+                     isStandaloneImage) {
+            if (tagParams.length == 0) {
+              tagParams = @"data-enriched-image-standalone=\"true\"";
+            } else {
+              tagParams = [NSString
+                  stringWithFormat:@"%@ %@", tagParams,
+                                   @"data-enriched-image-standalone=\"true\""];
+            }
           } else if ([currentTagName isEqualToString:@"li"] &&
                      ongoingListTags.count > 0) {
             BOOL isCheckboxListItem =
@@ -1107,11 +1240,26 @@
           }
 
           if (isSelfClosing) {
+            if ([currentTagName isEqualToString:@"img"]) {
+              [plainText appendString:@"\uFFFC"];
+            }
             [self finalizeTagEntry:currentTagName
                            ongoingTags:ongoingTags
                 initiallyProcessedTags:initiallyProcessedTags
                              plainText:plainText
                    precedingImageCount:&precedingImageCount];
+            if ([currentTagName isEqualToString:@"img"]) {
+              if (isStandaloneImage) {
+                [plainText appendString:@"\n"];
+                if (i + 1 < fixedHtml.length &&
+                    [[NSCharacterSet newlineCharacterSet]
+                        characterIsMember:[fixedHtml characterAtIndex:i + 1]]) {
+                  i += 1;
+                }
+              }
+              lastVisibleTokenWasImage = YES;
+              lastVisibleTokenWasStandaloneImage = isStandaloneImage;
+            }
           }
         }
       } else {
@@ -1125,7 +1273,8 @@
         if (isBlockTag && plainText.length > 0 &&
             [[NSCharacterSet newlineCharacterSet]
                 characterIsMember:[plainText
-                                      characterAtIndex:plainText.length - 1]]) {
+                                      characterAtIndex:plainText.length - 1]] &&
+            !lastVisibleTokenWasStandaloneImage) {
           plainText = [[plainText
               substringWithRange:NSMakeRange(0, plainText.length - 1)]
               mutableCopy];
@@ -1142,6 +1291,10 @@
                          plainText:plainText
                precedingImageCount:&precedingImageCount];
 
+        if ([currentTagName isEqualToString:@"p"] && paragraphDepth > 0) {
+          paragraphDepth--;
+        }
+
         if (([currentTagName isEqualToString:@"ul"] ||
              [currentTagName isEqualToString:@"ol"]) &&
             ongoingListTags.count > 0) {
@@ -1153,6 +1306,7 @@
       }
       // post-tag cleanup
       closingTag = NO;
+      currentTagStartIndex = -1;
       currentTagName = [[NSMutableString alloc] initWithString:@""];
       currentTagParams = [[NSMutableString alloc] initWithString:@""];
     } else {
@@ -1166,10 +1320,23 @@
           NSString *escaped = entityInfo[0];
           NSString *unescaped = entityInfo[1];
           [plainText appendString:unescaped];
+          if ([unescaped
+                  rangeOfCharacterFromSet:[[NSCharacterSet
+                                              whitespaceAndNewlineCharacterSet]
+                                              invertedSet]]
+                  .location != NSNotFound) {
+            lastVisibleTokenWasImage = NO;
+            lastVisibleTokenWasStandaloneImage = NO;
+          }
           // the iterator will forward by 1 itself
           i += escaped.length - 1;
         } else {
           [plainText appendString:currentCharacterStr];
+          if (![[NSCharacterSet whitespaceAndNewlineCharacterSet]
+                  characterIsMember:currentCharacterChar]) {
+            lastVisibleTokenWasImage = NO;
+            lastVisibleTokenWasStandaloneImage = NO;
+          }
         }
       } else {
         if (gettingTagName) {
@@ -1232,6 +1399,8 @@
                                                  srcRange.length - 6)];
       ImageData *imageData = [[ImageData alloc] init];
       imageData.uri = uri;
+      imageData.standalone =
+          [params containsString:@"data-enriched-image-standalone=\"true\""];
 
       NSRegularExpression *widthRegex = [NSRegularExpression
           regularExpressionWithPattern:@"width=\"([0-9.]+)\""
@@ -1384,18 +1553,38 @@
       NSArray<NSValue *> *paragraphRanges =
           [self paragraphRangesInListItemRange:tagRangeValue.rangeValue
                                      plainText:plainText];
+      NSNumber *checkboxStatePosition =
+          [listItemTag isEqualToString:@"checkbox"]
+              ? [self checkboxStatePositionInListItemRange:tagRangeValue
+                                                               .rangeValue
+                                            checkboxStates:checkboxStates]
+              : nil;
+      BOOL hasEmittedBaseListMarker = NO;
 
       for (NSUInteger paragraphIndex = 0;
            paragraphIndex < paragraphRanges.count; paragraphIndex++) {
+        NSRange paragraphRange = [paragraphRanges[paragraphIndex] rangeValue];
+        if (checkboxStatePosition != nil &&
+            NSMaxRange(paragraphRange) <=
+                [checkboxStatePosition unsignedIntegerValue]) {
+          continue;
+        }
+
+        BOOL shouldUseBaseMarker = checkboxStatePosition != nil
+                                       ? !hasEmittedBaseListMarker
+                                       : paragraphIndex == 0;
         NSMutableArray *listStyleArr = [[NSMutableArray alloc] init];
         StylePair *listStylePair = [[StylePair alloc] init];
         listStylePair.rangeValue = paragraphRanges[paragraphIndex];
         listStylePair.styleValue =
-            [self listMarkerValueWithBase:(paragraphIndex == 0
+            [self listMarkerValueWithBase:(shouldUseBaseMarker
                                                ? baseValue
                                                : continuationBaseValue)
                                     level:listLevel
                                 contextId:listContextId];
+        if (shouldUseBaseMarker) {
+          hasEmittedBaseListMarker = YES;
+        }
         [listStyleArr addObject:styleType];
         [listStyleArr addObject:listStylePair];
         [processedStyles addObject:listStyleArr];

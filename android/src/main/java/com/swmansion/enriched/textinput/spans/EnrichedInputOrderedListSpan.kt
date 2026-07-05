@@ -8,11 +8,20 @@ class EnrichedInputOrderedListSpan(
   index: Int,
   htmlStyle: HtmlStyle,
   level: Int = 0,
-) : EnrichedOrderedListSpan(index, htmlStyle, level),
+  markerStart: Int = -1,
+  enclosingBlockQuoteDepth: Int = 0,
+) : EnrichedOrderedListSpan(
+    index,
+    htmlStyle,
+    level,
+    markerStart,
+    enclosingBlockQuoteDepth,
+  ),
   EnrichedInputSpan {
   override val dependsOnHtmlStyle: Boolean = true
 
-  override fun rebuildWithStyle(htmlStyle: HtmlStyle): EnrichedInputOrderedListSpan = EnrichedInputOrderedListSpan(index, htmlStyle, level)
+  override fun rebuildWithStyle(htmlStyle: HtmlStyle): EnrichedInputOrderedListSpan =
+    EnrichedInputOrderedListSpan(index, htmlStyle, level, markerStart, enclosingBlockQuoteDepth)
 
   fun getListIndex(): Int = index
 

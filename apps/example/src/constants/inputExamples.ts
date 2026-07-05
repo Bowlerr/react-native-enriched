@@ -13,6 +13,193 @@ export const INPUT_HTML_EXAMPLES: InputExample[] = [
     html: STRESS_TEST_HTML,
   },
   {
+    key: 'nested-marker-ordering',
+    title: 'Nested Marker Ordering',
+    html: `
+<p>Root list items whose first child is a quote:</p>
+<ul>
+  <li>
+    <blockquote>
+      <p>Quote is the first child inside an unordered item.</p>
+    </blockquote>
+  </li>
+  <li>
+    Unordered item before checkbox children
+    <ul data-type="checkbox">
+      <li checked>
+        <blockquote>
+          <p>Quote is the first child inside a checked checkbox inside an unordered item.</p>
+        </blockquote>
+      </li>
+      <li>
+        <blockquote>
+          <p>Quote is the first child inside an unchecked checkbox inside an unordered item.</p>
+        </blockquote>
+      </li>
+    </ul>
+  </li>
+</ul>
+<ol>
+  <li>
+    <blockquote>
+      <p>Quote is the first child inside an ordered item.</p>
+    </blockquote>
+  </li>
+  <li>
+    Ordered item before checkbox children
+    <ul data-type="checkbox">
+      <li checked>
+        <blockquote>
+          <p>Quote is the first child inside a checked checkbox inside an ordered item.</p>
+        </blockquote>
+      </li>
+      <li>
+        <blockquote>
+          <p>Quote is the first child inside an unchecked checkbox inside an ordered item.</p>
+        </blockquote>
+      </li>
+    </ul>
+  </li>
+</ol>
+<ul data-type="checkbox">
+  <li checked>
+    <blockquote>
+      <p>Quote is the first child inside a checked root checkbox.</p>
+    </blockquote>
+  </li>
+  <li>
+    <blockquote>
+      <p>Quote is the first child inside an unchecked root checkbox.</p>
+    </blockquote>
+  </li>
+  <li checked>
+    Checked root checkbox before nested list children
+    <ol>
+      <li>
+        <blockquote>
+          <p>Quote is the first child inside an ordered child of a checked checkbox.</p>
+        </blockquote>
+      </li>
+    </ol>
+    <ul>
+      <li>
+        <blockquote>
+          <p>Quote is the first child inside an unordered child of a checked checkbox.</p>
+        </blockquote>
+      </li>
+    </ul>
+  </li>
+</ul>
+<blockquote>
+  <p>Outer quote before ordered and unordered list branches.</p>
+  <ol>
+    <li>
+      <blockquote>
+        <p>Quote is the first child inside an ordered item inside an outer quote.</p>
+      </blockquote>
+    </li>
+    <li>
+      Ordered item inside quote with unordered child
+      <ul>
+        <li>
+          <blockquote>
+            <p>Quote is the first child inside an unordered child inside an ordered item inside a quote.</p>
+          </blockquote>
+        </li>
+      </ul>
+    </li>
+  </ol>
+  <ul>
+    <li>
+      <blockquote>
+        <p>Quote is the first child inside an unordered item inside an outer quote.</p>
+      </blockquote>
+    </li>
+  </ul>
+  <ul data-type="checkbox">
+    <li checked>
+      <blockquote>
+        <p>Quote is the first child inside a checked checkbox inside an outer quote.</p>
+      </blockquote>
+    </li>
+    <li>
+      <blockquote>
+        <p>Quote is the first child inside an unchecked checkbox inside an outer quote.</p>
+      </blockquote>
+    </li>
+  </ul>
+</blockquote>
+<ul>
+  <li>
+    List item with checkbox children
+    <ul data-type="checkbox">
+      <li checked>
+        Checked checkbox with ordered children
+        <ol>
+          <li>Ordered child inside checked checkbox</li>
+          <li>
+            <blockquote>
+              <p>Quote is the first child inside an ordered child inside a checked checkbox.</p>
+            </blockquote>
+          </li>
+        </ol>
+      </li>
+      <li>
+        Unchecked checkbox with unordered children
+        <ul>
+          <li>Unordered child inside unchecked checkbox</li>
+          <li>
+            <blockquote>
+              <p>Quote is the first child inside an unordered child inside an unchecked checkbox.</p>
+            </blockquote>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+<ul data-type="checkbox">
+  <li checked>
+    Checked checkbox root with nested quote and list
+    <blockquote>
+      <p>Quote inside checked checkbox root.</p>
+      <ul>
+        <li>
+          <blockquote>
+            <p>Quote is the first child inside an unordered child inside a checked checkbox quote.</p>
+          </blockquote>
+        </li>
+      </ul>
+      <ol>
+        <li>
+          <blockquote>
+            <p>Quote is the first child inside an ordered child inside a checked checkbox quote.</p>
+          </blockquote>
+        </li>
+      </ol>
+    </blockquote>
+  </li>
+  <li>
+    Checkbox root with ordered child and nested quote
+    <ol>
+      <li>
+        <blockquote>
+          <p>Quote is the first child inside an ordered child inside an unchecked checkbox.</p>
+        </blockquote>
+      </li>
+    </ol>
+    <ul>
+      <li>
+        <blockquote>
+          <p>Quote is the first child inside an unordered child inside an unchecked checkbox.</p>
+        </blockquote>
+      </li>
+    </ul>
+  </li>
+</ul>
+`,
+  },
+  {
     key: 'quotes-in-lists',
     title: 'Quotes In Lists',
     html: `
@@ -185,11 +372,29 @@ Line 2 inside code block</code></pre>
     key: 'checkbox-quote-matrix',
     title: 'Checkbox Quote Matrix',
     html: `
+<html>
+<p>Root checkbox items whose first visible child is a quote:</p>
 <ul data-type="checkbox">
   <li checked>
-    Checked root checkbox containing quote, list, and code
+    Checked checkbox before a first-child quote
     <blockquote>
-      <p>Quote inside checked checkbox with <mention id="matrix-user" text="@Matrix User" indicator="@">@Matrix User</mention> and <mention id="matrix-channel" text="#matrix" indicator="#">#matrix</mention>.</p>
+      <p>Checked marker, then quote marker. This quote includes <strong>bold</strong>, <code>inline code</code>, <mention id="matrix-user" text="@Matrix User" indicator="@">@Matrix User</mention>, and <mention id="matrix-channel" text="#matrix" indicator="#">#matrix</mention>.</p>
+    </blockquote>
+  </li>
+  <li>
+    Unchecked checkbox before a first-child quote
+    <blockquote>
+      <p>Unchecked marker, then quote marker. The unchecked box should not be hidden by the quote.</p>
+    </blockquote>
+  </li>
+</ul>
+
+<p>Checkbox item, quote, then lists, then nested quote:</p>
+<ul data-type="checkbox">
+  <li checked>
+    Checked checkbox containing quote with ordered, unordered, and checkbox descendants
+    <blockquote>
+      <p>Quote inside checked checkbox before child lists.</p>
       <ol>
         <li>Ordered child inside checked checkbox quote</li>
         <li>
@@ -199,7 +404,7 @@ Line 2 inside code block</code></pre>
             <li>
               Unchecked grandchild checkbox containing nested quote
               <blockquote>
-                <p>Nested quote inside checkbox grandchild.</p>
+                <p>Ordered marker, unchecked checkbox marker, then nested quote marker.</p>
                 <ul>
                   <li>Bullet inside nested checkbox quote</li>
                 </ul>
@@ -208,18 +413,248 @@ Line 2 inside code block</code></pre>
           </ul>
         </li>
       </ol>
+      <ul>
+        <li>Bullet child inside checked checkbox quote</li>
+        <li>
+          Bullet child containing nested checked checkbox quote
+          <ul data-type="checkbox">
+            <li checked>
+              Checked checkbox inside bullet inside quote
+              <blockquote>
+                <p>Quote marker should appear after quote, bullet, and checkbox markers.</p>
+              </blockquote>
+            </li>
+            <li>
+              Unchecked checkbox sibling inside bullet inside quote
+              <blockquote>
+                <p>Unchecked checkbox marker should remain before this quote marker.</p>
+              </blockquote>
+            </li>
+          </ul>
+        </li>
+      </ul>
+      <ul data-type="checkbox">
+        <li checked>
+          Checked checkbox child inside checked checkbox quote
+          <blockquote>
+            <p>Quote after nested checked checkbox inside quote.</p>
+          </blockquote>
+        </li>
+        <li>
+          Unchecked checkbox child inside checked checkbox quote
+          <blockquote>
+            <p>Quote after nested unchecked checkbox inside quote.</p>
+          </blockquote>
+        </li>
+      </ul>
       <pre><code>code block inside checked checkbox quote
 line 2 stays inside quote
 line 3 keeps code padding</code></pre>
+      <p>Image inside checked checkbox quote:</p>
+      <p><img src="https://reactnative.dev/img/tiny_logo.png" width="48" height="48" /></p>
     </blockquote>
   </li>
   <li>
     Unchecked root checkbox after deep checked item
     <ul>
       <li>Bullet child after previous quoted checkbox</li>
+      <li>
+        Bullet child containing checked checkbox quote
+        <ul data-type="checkbox">
+          <li checked>
+            Checked checkbox inside unchecked root branch
+            <blockquote>
+              <p>Bullet marker, checked checkbox marker, then quote marker.</p>
+            </blockquote>
+          </li>
+        </ul>
+      </li>
+    </ul>
+    <ol>
+      <li>
+        Ordered child containing unchecked checkbox quote
+        <ul data-type="checkbox">
+          <li>
+            Unchecked checkbox inside ordered child
+            <blockquote>
+              <p>Number marker, unchecked checkbox marker, then quote marker.</p>
+            </blockquote>
+          </li>
+        </ul>
+      </li>
+    </ol>
+  </li>
+</ul>
+
+<p>Root list items whose first visible child is a quote:</p>
+<ul>
+  <li>
+    <blockquote>
+      <p>Bullet marker, then quote marker.</p>
+    </blockquote>
+  </li>
+  <li>
+    Bullet item with checkbox children before quote
+    <ul data-type="checkbox">
+      <li checked>
+        <blockquote>
+          <p>Bullet marker, checked checkbox marker, then quote marker.</p>
+        </blockquote>
+      </li>
+      <li>
+        <blockquote>
+          <p>Bullet marker, unchecked checkbox marker, then quote marker.</p>
+        </blockquote>
+      </li>
     </ul>
   </li>
 </ul>
+<ol>
+  <li>
+    <blockquote>
+      <p>Number marker, then quote marker.</p>
+    </blockquote>
+  </li>
+  <li>
+    Ordered item with checkbox children before quote
+    <ul data-type="checkbox">
+      <li checked>
+        <blockquote>
+          <p>Number marker, checked checkbox marker, then quote marker.</p>
+        </blockquote>
+      </li>
+      <li>
+        <blockquote>
+          <p>Number marker, unchecked checkbox marker, then quote marker.</p>
+        </blockquote>
+      </li>
+    </ul>
+  </li>
+</ol>
+
+<p>Quote root with marker chains inside it:</p>
+<blockquote>
+  <p>Outer quote before marker chains.</p>
+  <ul>
+    <li>
+      <blockquote>
+        <p>Quote marker, bullet marker, quote marker.</p>
+      </blockquote>
+    </li>
+    <li>
+      Bullet inside quote before checkbox grandchildren
+      <ul data-type="checkbox">
+        <li checked>
+          <blockquote>
+            <p>Quote marker, bullet marker, checked checkbox marker, quote marker.</p>
+          </blockquote>
+        </li>
+        <li>
+          <blockquote>
+            <p>Quote marker, bullet marker, unchecked checkbox marker, quote marker.</p>
+          </blockquote>
+        </li>
+      </ul>
+    </li>
+  </ul>
+  <ol>
+    <li>
+      <blockquote>
+        <p>Quote marker, number marker, quote marker.</p>
+      </blockquote>
+    </li>
+    <li>
+      Ordered item inside quote before checkbox grandchildren
+      <ul data-type="checkbox">
+        <li checked>
+          <blockquote>
+            <p>Quote marker, number marker, checked checkbox marker, quote marker.</p>
+          </blockquote>
+        </li>
+        <li>
+          <blockquote>
+            <p>Quote marker, number marker, unchecked checkbox marker, quote marker.</p>
+          </blockquote>
+        </li>
+      </ul>
+    </li>
+  </ol>
+  <ul data-type="checkbox">
+    <li checked>
+      <blockquote>
+        <p>Quote marker, checked checkbox marker, quote marker.</p>
+      </blockquote>
+    </li>
+    <li>
+      <blockquote>
+        <p>Quote marker, unchecked checkbox marker, quote marker.</p>
+      </blockquote>
+    </li>
+  </ul>
+</blockquote>
+
+<p>Checkbox item with list children and quote grandchildren:</p>
+<ul data-type="checkbox">
+  <li checked>
+    Checked checkbox with unordered list children
+    <ul>
+      <li>
+        <blockquote>
+          <p>Checked checkbox marker, bullet marker, quote marker.</p>
+        </blockquote>
+      </li>
+      <li>
+        Bullet child with checked checkbox quote
+        <ul data-type="checkbox">
+          <li checked>
+            <blockquote>
+              <p>Checked checkbox marker, bullet marker, checked checkbox marker, quote marker.</p>
+            </blockquote>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+  <li>
+    Unchecked checkbox with ordered list children
+    <ol>
+      <li>
+        <blockquote>
+          <p>Unchecked checkbox marker, number marker, quote marker.</p>
+        </blockquote>
+      </li>
+      <li>
+        Ordered child with unchecked checkbox quote
+        <ul data-type="checkbox">
+          <li>
+            <blockquote>
+              <p>Unchecked checkbox marker, number marker, unchecked checkbox marker, quote marker.</p>
+            </blockquote>
+          </li>
+        </ul>
+      </li>
+    </ol>
+  </li>
+</ul>
+
+<p>Inline, media, and block recovery after nested markers:</p>
+<ul data-type="checkbox">
+  <li checked>
+    Checked checkbox with trailing inline styles after nested quote
+    <blockquote>
+      <p>Nested quote before inline recovery.</p>
+    </blockquote>
+    <p>Inline recovery after quote: <strong>bold</strong>, <em>italic</em>, <a href="https://example.com">link</a>, <code>inline code</code>.</p>
+  </li>
+  <li>
+    Unchecked checkbox with code block and image siblings
+    <pre><code>checkbox matrix standalone code block
+line 2 keeps padding
+line 3 wraps inside the block</code></pre>
+    <p><img src="https://reactnative.dev/img/tiny_logo.png" width="48" height="48" /></p>
+  </li>
+</ul>
+</html>
 `,
   },
   {

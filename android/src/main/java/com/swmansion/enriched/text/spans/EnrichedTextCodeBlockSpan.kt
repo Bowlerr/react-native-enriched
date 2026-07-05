@@ -9,6 +9,7 @@ class EnrichedTextCodeBlockSpan(
 ) : EnrichedCodeBlockSpan(enrichedStyle),
   EnrichedTextSpan {
   override val dependsOnHtmlStyle = true
+  override val collapsesInvisibleContent = true
 
   override fun rebuildWithStyle(style: EnrichedTextStyle) = EnrichedTextCodeBlockSpan(style)
 }

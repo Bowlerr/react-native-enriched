@@ -12,8 +12,10 @@ import android.text.style.LeadingMarginSpan
 import android.text.style.LineBackgroundSpan
 import android.text.style.LineHeightSpan
 import android.text.style.MetricAffectingSpan
+import com.swmansion.enriched.common.EnrichedConstants
 import com.swmansion.enriched.common.EnrichedStyle
 import com.swmansion.enriched.common.spans.interfaces.EnrichedBlockSpan
+import com.swmansion.enriched.common.spans.interfaces.EnrichedCollapsibleLayoutSpan
 import com.swmansion.enriched.common.spans.interfaces.EnrichedListSpan
 
 open class EnrichedCodeBlockSpan(
@@ -22,7 +24,10 @@ open class EnrichedCodeBlockSpan(
   LeadingMarginSpan,
   LineHeightSpan,
   LineBackgroundSpan,
-  EnrichedBlockSpan {
+  EnrichedBlockSpan,
+  EnrichedCollapsibleLayoutSpan {
+  override val collapsesInvisibleContent = false
+
   override fun updateDrawState(paint: TextPaint) {
     paint.typeface = Typeface.MONOSPACE
     paint.color = enrichedStyle.codeBlockColor
@@ -66,6 +71,11 @@ open class EnrichedCodeBlockSpan(
     val spanStart = text.getSpanStart(this)
     val spanEnd = text.getSpanEnd(this)
     if (spanStart < 0 || spanEnd < 0) {
+      return
+    }
+
+    if (collapsesInvisibleContent && !hasVisibleContent(text, start, end)) {
+      collapseLineHeight(fm)
       return
     }
 
@@ -249,7 +259,7 @@ open class EnrichedCodeBlockSpan(
       }
 
       is EnrichedUnorderedListSpan -> {
-        enrichedStyle.ulMarginLeft * level + enrichedStyle.ulGapWidth + enrichedStyle.ulBulletSize
+        enrichedStyle.ulMarginLeft * level + enrichedStyle.ulGapWidth
       }
 
       else -> {
@@ -268,6 +278,27 @@ open class EnrichedCodeBlockSpan(
     end: Int,
     spanEnd: Int,
   ): Boolean = end == spanEnd || (spanEnd < text.length && spanEnd + 1 == end && text[spanEnd] == '\n')
+
+  private fun hasVisibleContent(
+    text: CharSequence,
+    start: Int,
+    end: Int,
+  ): Boolean {
+    val safeEnd = end.coerceAtMost(text.length)
+    for (index in start until safeEnd) {
+      if (text[index] != EnrichedConstants.ZWS && !Character.isWhitespace(text[index])) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private fun collapseLineHeight(fm: Paint.FontMetricsInt) {
+    fm.ascent = 0
+    fm.top = 0
+    fm.descent = 0
+    fm.bottom = 0
+  }
 
   companion object {
     private const val CODE_BLOCK_HORIZONTAL_PADDING = 12

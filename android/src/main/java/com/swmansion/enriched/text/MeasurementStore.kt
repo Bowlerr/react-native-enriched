@@ -42,7 +42,7 @@ object MeasurementStore {
     val builder =
       StaticLayout.Builder
         .obtain(text, 0, textLength, paint, maxWidth.toInt())
-        .setIncludePad(true)
+        .setIncludePad(false)
         .setLineSpacing(0f, 1f)
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -118,7 +118,7 @@ object MeasurementStore {
 
       val normalized = GumboNormalizer.normalizeHtml(text) ?: return text
       return try {
-        val enrichedStyle = EnrichedTextStyle.fromReadableMap(context as ReactContext, fontSize, style ?: return text)
+        val enrichedStyle = EnrichedTextStyle.fromReadableMap(context as ReactContext, style ?: return text)
         val parsed = EnrichedParser.fromHtml(normalized, enrichedStyle, factory)
         parsed.trimEnd('\n')
       } catch (e: Exception) {
@@ -129,7 +129,7 @@ object MeasurementStore {
 
     try {
       if (style == null) return text
-      val enrichedStyle = EnrichedTextStyle.fromReadableMap(context as ReactContext, fontSize, style)
+      val enrichedStyle = EnrichedTextStyle.fromReadableMap(context as ReactContext, style)
       val parsed = EnrichedParser.fromHtml(text, enrichedStyle, factory)
       return parsed.trimEnd('\n')
     } catch (e: Exception) {

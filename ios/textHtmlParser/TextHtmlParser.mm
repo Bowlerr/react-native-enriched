@@ -25,6 +25,140 @@ static BOOL EnrichedHtmlStyleTypeIsList(NSNumber *styleType) {
          [styleType isEqualToNumber:@([CheckboxListStyle getType])];
 }
 
+static BOOL EnrichedTextHtmlMarkerMatches(NSString *markerFormat,
+                                          NSString *baseValue) {
+  if (markerFormat == nil) {
+    return NO;
+  }
+
+  NSString *continuationBaseValue =
+      [baseValue stringByAppendingString:@"Continuation"];
+  return [markerFormat isEqualToString:baseValue] ||
+         [markerFormat hasPrefix:[baseValue stringByAppendingString:@":"]] ||
+         [markerFormat isEqualToString:continuationBaseValue] ||
+         [markerFormat
+             hasPrefix:[continuationBaseValue stringByAppendingString:@":"]];
+}
+
+static BOOL EnrichedTextHtmlParagraphHasCollapsibleLayoutMarker(
+    NSParagraphStyle *paragraphStyle) {
+  if (paragraphStyle == nil) {
+    return NO;
+  }
+
+  for (NSTextList *textList in paragraphStyle.textLists) {
+    NSString *markerFormat = textList.markerFormat;
+    if (EnrichedTextHtmlMarkerMatches(markerFormat, @"EnrichedBlockQuote") ||
+        EnrichedTextHtmlMarkerMatches(markerFormat, @"EnrichedUnorderedList") ||
+        EnrichedTextHtmlMarkerMatches(markerFormat, @"EnrichedOrderedList") ||
+        [markerFormat hasPrefix:@"EnrichedCheckbox"] ||
+        [markerFormat isEqualToString:@"EnrichedCodeBlock"]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static BOOL EnrichedTextHtmlParagraphHasVisibleContent(NSString *text,
+                                                       NSRange range) {
+  if (range.location >= text.length) {
+    return NO;
+  }
+
+  NSUInteger safeLength = MIN(range.length, text.length - range.location);
+  NSString *paragraph =
+      [text substringWithRange:NSMakeRange(range.location, safeLength)];
+  NSMutableString *normalized = [paragraph mutableCopy];
+  [normalized replaceOccurrencesOfString:@"\u200B"
+                              withString:@""
+                                 options:0
+                                   range:NSMakeRange(0, normalized.length)];
+
+  NSString *trimmed = [normalized
+      stringByTrimmingCharactersInSet:[NSCharacterSet
+                                          whitespaceAndNewlineCharacterSet]];
+  return trimmed.length > 0;
+}
+
+static NSUInteger
+EnrichedHtmlInsertionCountBefore(NSArray<NSNumber *> *insertions,
+                                 NSUInteger location) {
+  NSUInteger count = 0;
+  for (NSNumber *insertion in insertions) {
+    if ([insertion unsignedIntegerValue] < location) {
+      count++;
+    }
+  }
+  return count;
+}
+
+static NSUInteger
+EnrichedHtmlInsertionCountAtOrBefore(NSArray<NSNumber *> *insertions,
+                                     NSUInteger location) {
+  NSUInteger count = 0;
+  for (NSNumber *insertion in insertions) {
+    if ([insertion unsignedIntegerValue] <= location) {
+      count++;
+    }
+  }
+  return count;
+}
+
+static NSRange
+EnrichedHtmlRangeAdjustedForInsertions(NSRange range,
+                                       NSArray<NSNumber *> *insertions) {
+  NSUInteger originalStart = range.location;
+  NSUInteger originalEnd = NSMaxRange(range);
+  NSUInteger adjustedStart = originalStart + EnrichedHtmlInsertionCountBefore(
+                                                 insertions, originalStart);
+  NSUInteger adjustedEnd =
+      originalEnd + EnrichedHtmlInsertionCountBefore(insertions, originalEnd);
+  return NSMakeRange(adjustedStart, adjustedEnd - adjustedStart);
+}
+
+static NSUInteger EnrichedHtmlOriginalLocationForAdjustedLocation(
+    NSUInteger adjustedLocation, NSArray<NSNumber *> *insertions) {
+  NSUInteger originalLocation = adjustedLocation;
+  while (true) {
+    NSUInteger previousLocation = originalLocation;
+    NSUInteger insertionCount =
+        EnrichedHtmlInsertionCountAtOrBefore(insertions, originalLocation);
+    originalLocation = adjustedLocation >= insertionCount
+                           ? adjustedLocation - insertionCount
+                           : 0;
+    if (originalLocation == previousLocation) {
+      return originalLocation;
+    }
+  }
+}
+
+static void EnrichedHtmlRecordInsertedZeroWidthSpaces(
+    NSString *before, NSString *after, NSMutableArray<NSNumber *> *insertions) {
+  if (after.length <= before.length) {
+    return;
+  }
+
+  NSUInteger beforeIndex = 0;
+  NSUInteger afterIndex = 0;
+  while (afterIndex < after.length) {
+    if (beforeIndex < before.length && [before characterAtIndex:beforeIndex] ==
+                                           [after
+                                               characterAtIndex:afterIndex]) {
+      beforeIndex++;
+      afterIndex++;
+      continue;
+    }
+
+    if ([after characterAtIndex:afterIndex] == 0x200B) {
+      NSUInteger originalLocation =
+          EnrichedHtmlOriginalLocationForAdjustedLocation(beforeIndex,
+                                                          insertions);
+      [insertions addObject:@(originalLocation)];
+    }
+    afterIndex++;
+  }
+}
+
 static void EnrichedHtmlApplyPendingStyles(NSArray *pendingEntries) {
   for (NSArray *entry in pendingEntries) {
     StyleBase *style = entry[0];
@@ -64,6 +198,7 @@ static void EnrichedHtmlApplyPendingStyles(NSArray *pendingEntries) {
     [_view->textView.textStorage setAttributedString:body];
     [self applyProcessedStyles:processedStyles];
     [self applyProcessedAlignments:alignments];
+    [self collapseInvisibleLayoutParagraphs];
   } @catch (NSException *exception) {
     RCTLogWarn(@"[EnrichedTextView]: Failed to parse HTML: (%@), falling back "
                @"to raw input.",
@@ -75,11 +210,64 @@ static void EnrichedHtmlApplyPendingStyles(NSArray *pendingEntries) {
   }
 }
 
+- (void)collapseInvisibleLayoutParagraphs {
+  NSTextStorage *textStorage = _view->textView.textStorage;
+  NSString *text = textStorage.string;
+  if (text.length == 0) {
+    return;
+  }
+
+  UIFont *collapsedFont = [UIFont systemFontOfSize:0.1];
+  NSUInteger cursor = 0;
+  while (cursor < text.length) {
+    NSRange paragraphRange =
+        [text paragraphRangeForRange:NSMakeRange(cursor, 0)];
+    if (paragraphRange.length == 0 ||
+        paragraphRange.location >= textStorage.length) {
+      break;
+    }
+
+    NSUInteger attributeLocation =
+        MIN(paragraphRange.location, textStorage.length - 1);
+    NSParagraphStyle *paragraphStyle =
+        [textStorage attribute:NSParagraphStyleAttributeName
+                       atIndex:attributeLocation
+                effectiveRange:nil];
+
+    if (!EnrichedTextHtmlParagraphHasVisibleContent(text, paragraphRange) &&
+        EnrichedTextHtmlParagraphHasCollapsibleLayoutMarker(paragraphStyle)) {
+      NSMutableParagraphStyle *collapsedStyle =
+          paragraphStyle != nil ? [paragraphStyle mutableCopy]
+                                : [[NSMutableParagraphStyle alloc] init];
+      collapsedStyle.paragraphSpacing = 0.0;
+      collapsedStyle.paragraphSpacingBefore = 0.0;
+      collapsedStyle.lineSpacing = 0.0;
+      collapsedStyle.lineHeightMultiple = 0.0;
+      collapsedStyle.minimumLineHeight = 0.1;
+      collapsedStyle.maximumLineHeight = 0.1;
+      [textStorage addAttribute:NSParagraphStyleAttributeName
+                          value:collapsedStyle
+                          range:paragraphRange];
+      [textStorage addAttribute:NSFontAttributeName
+                          value:collapsedFont
+                          range:paragraphRange];
+    }
+
+    NSUInteger nextCursor = NSMaxRange(paragraphRange);
+    if (nextCursor <= cursor) {
+      break;
+    }
+    cursor = nextCursor;
+  }
+}
+
 - (void)applyProcessedStyles:(NSArray *_Nonnull)processedStyles {
-  // Some paragraph styles (codeblock, blockquote, etc.) insert \u200B
-  // into empty lines, mutating NSTextStorage length. We need to
-  // shift subsequent ranges by this offset.
-  NSInteger zeroWidthSpaceOffset = 0;
+  // HTML parser ranges are relative to plain text before image attachments and
+  // zero-width spaces are inserted. Track every inserted character by original
+  // plain-text location so later ranges move while earlier/nested ranges do
+  // not.
+  NSMutableArray<NSNumber *> *textStorageInsertions =
+      [[NSMutableArray alloc] init];
 
   // Inline styles collected during the first pass so their applyStyling: can
   // be re-run after all paragraph styles have applied their visual attributes.
@@ -106,12 +294,15 @@ static void EnrichedHtmlApplyPendingStyles(NSArray *pendingEntries) {
     NSRange parsedRange = [stylePair.rangeValue rangeValue];
     NSUInteger textLengthBeforeStyleApplied =
         _view->textView.textStorage.string.length;
+    NSString *textBeforeStyleApplied =
+        [_view->textView.textStorage.string copy];
 
-    // Range must be taking zeroWidthSpaceOffset into consideration
+    // Range must take inserted ZWS characters into consideration
     // because processed styles ranges are relative to only the new text while
     // we need absolute ranges relative to the whole existing text
-    NSRange styleRange = NSMakeRange(
-        zeroWidthSpaceOffset + parsedRange.location, parsedRange.length);
+    NSRange styleRange = EnrichedHtmlRangeAdjustedForInsertions(
+        parsedRange, textStorageInsertions);
+    BOOL didApplyImageStyle = NO;
 
     if ([styleType isEqualToNumber:@([LinkStyle getType])]) {
       LinkData *linkData = (LinkData *)stylePair.styleValue;
@@ -125,6 +316,25 @@ static void EnrichedHtmlApplyPendingStyles(NSArray *pendingEntries) {
                                    imageData:imgData
                                withSelection:NO
                               withDirtyRange:NO];
+      didApplyImageStyle = YES;
+
+      if (imgData.standalone) {
+        NSUInteger afterImageLocation = styleRange.location + 1;
+        NSString *currentText = _view->textView.textStorage.string;
+        BOOL hasTrailingLineBreak =
+            afterImageLocation < currentText.length &&
+            [[NSCharacterSet newlineCharacterSet]
+                characterIsMember:[currentText
+                                      characterAtIndex:afterImageLocation]];
+        if (!hasTrailingLineBreak) {
+          NSAttributedString *lineBreak = [[NSAttributedString alloc]
+              initWithString:@"\n"
+                  attributes:_view->defaultTypingAttributes];
+          [_view->textView.textStorage
+              insertAttributedString:lineBreak
+                             atIndex:afterImageLocation];
+        }
+      }
     } else if ([styleType isEqualToNumber:@([CheckboxListStyle getType])]) {
       CheckboxListStyle *cbStyle = (CheckboxListStyle *)style;
 
@@ -147,7 +357,9 @@ static void EnrichedHtmlApplyPendingStyles(NSArray *pendingEntries) {
         if (checkboxStates && checkboxStates.count > 0) {
           for (NSNumber *key in checkboxStates) {
             NSUInteger checkboxPosition =
-                zeroWidthSpaceOffset + [key unsignedIntegerValue];
+                [key unsignedIntegerValue] +
+                EnrichedHtmlInsertionCountBefore(textStorageInsertions,
+                                                 [key unsignedIntegerValue]);
             BOOL isChecked = [checkboxStates[key] boolValue];
 
             if (isChecked) {
@@ -183,13 +395,23 @@ static void EnrichedHtmlApplyPendingStyles(NSArray *pendingEntries) {
 
     NSInteger delta = _view->textView.textStorage.string.length -
                       textLengthBeforeStyleApplied;
+    if (delta > 0 && didApplyImageStyle) {
+      for (NSInteger insertionIndex = 0; insertionIndex < delta;
+           insertionIndex++) {
+        [textStorageInsertions addObject:@(parsedRange.location)];
+      }
+    } else if (delta > 0) {
+      EnrichedHtmlRecordInsertedZeroWidthSpaces(
+          textBeforeStyleApplied, _view->textView.textStorage.string,
+          textStorageInsertions);
+    }
 
     // Use an adjusted range so that applyStyling covers any ZWS characters that
     // were just inserted by addSpacesIfNeededInHost:inRange:. Without this, a
     // style applied to an empty range {0,0} would call applyStyling on {0,0}
     // even after a ZWS was inserted.
-    NSRange adjustedStyleRange = NSMakeRange(
-        styleRange.location, styleRange.length + (NSUInteger)MAX(0LL, delta));
+    NSRange adjustedStyleRange = EnrichedHtmlRangeAdjustedForInsertions(
+        parsedRange, textStorageInsertions);
 
     if ([style isParagraph]) {
       NSRange paragraphApplyRange = [style actualUsedRange:adjustedStyleRange];
@@ -215,12 +437,6 @@ static void EnrichedHtmlApplyPendingStyles(NSArray *pendingEntries) {
       } else {
         [pendingInlineApply addObject:pendingEntry];
       }
-    }
-
-    // Image shifts are already handled by _precedingImageCount during tag
-    // finalization.
-    if (delta != 0 && ![styleType isEqualToNumber:@([ImageStyle getType])]) {
-      zeroWidthSpaceOffset += delta;
     }
   }
 

@@ -6,5 +6,6 @@
 @property NSString *uri;
 @property CGFloat width;
 @property CGFloat height;
+@property BOOL standalone;
 
 @end

@@ -109,10 +109,10 @@
 - (void)applyProcessedStyles:(NSArray *)processedStyles
          offsetFromBeginning:(NSInteger)offset
              plainTextLength:(NSUInteger)plainTextLength {
-  // Some paragraph styles (codeblock, blockquote, etc.) insert \u200B
-  // into empty lines, mutating NSTextStorage length. We need to
-  // shift subsequent ranges by this offset.
-  NSInteger zeroWidthSpaceOffset = 0;
+  // Some styles insert characters while applying HTML: image styles insert
+  // object-replacement characters and paragraph styles can insert \u200B into
+  // empty lines. We need to shift subsequent ranges by those mutations.
+  NSInteger insertedCharacterOffset = 0;
 
   for (NSArray *arr in processedStyles) {
     // unwrap all info from processed style
@@ -122,15 +122,16 @@
     NSRange parsedRange = [stylePair.rangeValue rangeValue];
     NSUInteger textLengthBeforeStyleApplied =
         _input->textView.textStorage.string.length;
-    // range must be taking zeroWidthSpaceOffset and offest into consideration
+    // range must take insertedCharacterOffset and offset into consideration
     // because processed styles ranges are relative to only the new text while
     // we need absolute ranges relative to the whole existing text
     NSRange styleRange =
-        NSMakeRange(offset + zeroWidthSpaceOffset + parsedRange.location,
+        NSMakeRange(offset + insertedCharacterOffset + parsedRange.location,
                     parsedRange.length);
 
-    BOOL shouldAddTypingAttr = styleRange.location + styleRange.length ==
-                               plainTextLength + offset + zeroWidthSpaceOffset;
+    BOOL shouldAddTypingAttr =
+        styleRange.location + styleRange.length ==
+        plainTextLength + offset + insertedCharacterOffset;
 
     if ([styleType isEqualToNumber:@([LinkStyle getType])]) {
       LinkData *linkData = (LinkData *)stylePair.styleValue;
@@ -170,7 +171,7 @@
         if (checkboxStates && checkboxStates.count > 0) {
           for (NSNumber *key in checkboxStates) {
             NSUInteger checkboxPosition =
-                offset + zeroWidthSpaceOffset + [key unsignedIntegerValue];
+                offset + insertedCharacterOffset + [key unsignedIntegerValue];
             BOOL isChecked = [checkboxStates[key] boolValue];
             if (isChecked) {
               [cbLStyle toggleCheckedAt:checkboxPosition withDirtyRange:YES];
@@ -205,10 +206,8 @@
 
     NSInteger delta = (NSInteger)_input->textView.textStorage.string.length -
                       (NSInteger)textLengthBeforeStyleApplied;
-    // Image shifts are already handled by _precedingImageCount during tag
-    // finalization.
-    if (delta != 0 && ![styleType isEqualToNumber:@([ImageStyle getType])]) {
-      zeroWidthSpaceOffset += delta;
+    if (delta != 0) {
+      insertedCharacterOffset += delta;
     }
   }
   [_input anyTextMayHaveBeenModified];

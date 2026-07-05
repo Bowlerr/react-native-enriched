@@ -7,15 +7,21 @@ import android.text.TextPaint
 import android.text.style.LeadingMarginSpan
 import android.text.style.MetricAffectingSpan
 import com.swmansion.enriched.common.EnrichedStyle
+import com.swmansion.enriched.common.spans.interfaces.EnrichedCollapsibleLayoutSpan
 import com.swmansion.enriched.common.spans.interfaces.EnrichedListSpan
 
 // https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/text/style/BulletSpan.java
 open class EnrichedUnorderedListSpan(
   private val enrichedStyle: EnrichedStyle,
   override var level: Int = 0,
+  override var markerStart: Int = -1,
+  override var enclosingBlockQuoteDepth: Int = 0,
 ) : MetricAffectingSpan(),
   LeadingMarginSpan,
-  EnrichedListSpan {
+  EnrichedListSpan,
+  EnrichedCollapsibleLayoutSpan {
+  override val collapsesInvisibleContent = false
+
   override fun updateMeasureState(p0: TextPaint) {
     // Do nothing, but inform layout that this span affects text metrics
   }
@@ -24,7 +30,7 @@ open class EnrichedUnorderedListSpan(
     // Do nothing, but inform layout that this span affects text metrics
   }
 
-  override fun getLeadingMargin(p0: Boolean): Int = enrichedStyle.ulBulletSize + enrichedStyle.ulGapWidth + listMargin()
+  override fun getLeadingMargin(p0: Boolean): Int = enrichedStyle.ulGapWidth + listMargin()
 
   override fun drawLeadingMargin(
     canvas: Canvas,
@@ -41,34 +47,52 @@ open class EnrichedUnorderedListSpan(
     layout: Layout?,
   ) {
     if (shouldDrawListMarker(text, start, end, first)) {
-      val style = paint.style
-      val oldColor = paint.color
-      paint.color = enrichedStyle.ulBulletColor
-      paint.style = Paint.Style.FILL
-
-      val bulletRadius = enrichedStyle.ulBulletSize / 2f
-      val fm = paint.fontMetricsInt
-      val yPosition = baseline + (fm.ascent + fm.descent) / 2f
-      val continuationOffset = blockquoteContinuationOffset(text, start, end)
-      val xPosition = x + dir * (bulletRadius + listMargin() - continuationOffset)
-
-      canvas.drawCircle(xPosition, yPosition, bulletRadius, paint)
-
-      paint.color = oldColor
-      paint.style = style
+      drawListMarker(
+        canvas,
+        paint,
+        x,
+        dir,
+        top,
+        baseline,
+        bottom,
+        text,
+        start,
+        end,
+        first,
+        layout,
+      )
     }
   }
 
-  private fun blockquoteContinuationOffset(
-    text: CharSequence,
+  override fun drawListMarker(
+    canvas: Canvas,
+    paint: Paint,
+    x: Int,
+    dir: Int,
+    top: Int,
+    baseline: Int,
+    bottom: Int,
+    text: CharSequence?,
     start: Int,
     end: Int,
-  ): Int =
-    if (isBlockQuoteContinuationMarker(text, start, end)) {
-      enrichedStyle.blockquoteStripeWidth + enrichedStyle.blockquoteGapWidth
-    } else {
-      0
-    }
+    first: Boolean,
+    layout: Layout?,
+  ) {
+    val style = paint.style
+    val oldColor = paint.color
+    paint.color = enrichedStyle.ulBulletColor
+    paint.style = Paint.Style.FILL
+
+    val bulletRadius = enrichedStyle.ulBulletSize / 2f
+    val fm = paint.fontMetricsInt
+    val yPosition = baseline + (fm.ascent + fm.descent) / 2f
+    val xPosition = x + dir * (listMargin() - bulletRadius)
+
+    canvas.drawCircle(xPosition, yPosition, bulletRadius, paint)
+
+    paint.color = oldColor
+    paint.style = style
+  }
 
   private fun listMargin(): Int = enrichedStyle.ulMarginLeft * (level.coerceAtLeast(0) + 1)
 }

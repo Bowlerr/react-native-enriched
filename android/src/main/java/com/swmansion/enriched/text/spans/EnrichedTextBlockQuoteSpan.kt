@@ -6,9 +6,11 @@ import com.swmansion.enriched.text.spans.interfaces.EnrichedTextSpan
 
 class EnrichedTextBlockQuoteSpan(
   enrichedStyle: EnrichedTextStyle,
-) : EnrichedBlockQuoteSpan(enrichedStyle),
+  quoteDepth: Int = 0,
+) : EnrichedBlockQuoteSpan(enrichedStyle, quoteDepth),
   EnrichedTextSpan {
+  override val collapsesInvisibleContent = true
   override val dependsOnHtmlStyle = true
 
-  override fun rebuildWithStyle(style: EnrichedTextStyle) = EnrichedTextBlockQuoteSpan(style)
+  override fun rebuildWithStyle(style: EnrichedTextStyle) = EnrichedTextBlockQuoteSpan(style, quoteDepth)
 }

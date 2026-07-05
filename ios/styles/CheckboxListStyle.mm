@@ -298,11 +298,19 @@ EnrichedCheckboxParagraphBlockQuoteLevel(NSParagraphStyle *pStyle) {
                                  effectiveRange:NULL];
 
   if (style && style.textLists.count > 0) {
+    NSString *marker = nil;
+    NSInteger markerLevel = -1;
     for (NSTextList *list in style.textLists) {
       if (EnrichedCheckboxDrawableMarkerMatches(list.markerFormat)) {
-        return list.markerFormat;
+        NSInteger currentLevel =
+            EnrichedCheckboxLevelFromMarker(list.markerFormat);
+        if (currentLevel > markerLevel) {
+          marker = list.markerFormat;
+          markerLevel = currentLevel;
+        }
       }
     }
+    return marker;
   }
 
   return nil;

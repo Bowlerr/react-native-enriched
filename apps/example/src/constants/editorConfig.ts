@@ -55,27 +55,27 @@ export const ANDROID_EXPERIMENTAL_SYNCHRONOUS_EVENTS = false;
 
 export const htmlStyle = {
   h1: {
-    fontSize: 72,
+    fontSize: 32,
     bold: true,
   },
   h2: {
-    fontSize: 60,
+    fontSize: 28,
     bold: true,
   },
   h3: {
-    fontSize: 50,
+    fontSize: 24,
     bold: true,
   },
   h4: {
-    fontSize: 40,
+    fontSize: 21,
     bold: true,
   },
   h5: {
-    fontSize: 30,
+    fontSize: 18,
     bold: true,
   },
   h6: {
-    fontSize: 24,
+    fontSize: 16,
     bold: true,
   },
   blockquote: {

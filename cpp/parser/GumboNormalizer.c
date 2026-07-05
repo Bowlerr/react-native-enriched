@@ -106,6 +106,24 @@ static void buffer_trim_whitespace(buffer_t *b) {
 
 static char *buffer_finish(buffer_t *b) { return b->data; /* caller owns */ }
 
+static bool buffer_ends_with(const buffer_t *b, const char *suffix) {
+  if (!b || !suffix)
+    return false;
+
+  size_t suffix_len = strlen(suffix);
+  if (suffix_len == 0 || b->len < suffix_len)
+    return false;
+
+  return memcmp(b->data + b->len - suffix_len, suffix, suffix_len) == 0;
+}
+
+static bool buffer_ends_with_inline_boundary(const buffer_t *b) {
+  return buffer_ends_with(b, "</b>") || buffer_ends_with(b, "</i>") ||
+         buffer_ends_with(b, "</u>") || buffer_ends_with(b, "</s>") ||
+         buffer_ends_with(b, "</code>") || buffer_ends_with(b, "</a>") ||
+         buffer_ends_with(b, "</mention>");
+}
+
 /* ------------------------------------------------------------------ */
 /*  Tag classification helpers                                         */
 /* ------------------------------------------------------------------ */
@@ -843,8 +861,10 @@ static void append_normalized_text(buffer_t *out, const char *text_raw,
   }
 
   bool output_ends_with_tag = out->len > 0 && out->data[out->len - 1] == '>';
-  bool pending_space = !suppress_boundary_spaces && !output_ends_with_tag &&
-                       start > 0 && out->len > 0;
+  bool output_ends_with_inline_boundary = buffer_ends_with_inline_boundary(out);
+  bool pending_space =
+      !suppress_boundary_spaces && start > 0 && out->len > 0 &&
+      (!output_ends_with_tag || output_ends_with_inline_boundary);
   bool emitted_visible_text = false;
   for (size_t i = start; i < end; i++) {
     char c = text_raw[i];
@@ -884,7 +904,9 @@ static void walk_node_with_whitespace(GumboNode *node, buffer_t *out,
       if (preserve_whitespace) {
         append_escaped_text(out, text_raw, text_len);
       } else if (node->type == GUMBO_NODE_WHITESPACE) {
-        if (!text_contains_newline(text_raw, text_len) && out->len > 0) {
+        if ((!text_contains_newline(text_raw, text_len) ||
+             buffer_ends_with_inline_boundary(out)) &&
+            out->len > 0) {
           buffer_append_str(out, " ");
         }
       } else {
@@ -1080,13 +1102,21 @@ static void walk_node_with_whitespace(GumboNode *node, buffer_t *out,
       buffer_append_str(out, "<blockquote");
       emit_attributes(el, out_name, out);
       buffer_append_str(out, ">");
-      if (wrap)
+      if (wrap) {
+        buffer_t bq = buffer_create(64);
+        emit_styles_open(&bq, es);
+        walk_children_with_whitespace(node, &bq, preserve_whitespace);
+        emit_styles_close(&bq, es);
+        buffer_trim_whitespace(&bq);
         buffer_append_str(out, "<p>");
-      emit_styles_open(out, es);
-      walk_children_with_whitespace(node, out, preserve_whitespace);
-      emit_styles_close(out, es);
-      if (wrap)
+        buffer_append(out, bq.data, bq.len);
         buffer_append_str(out, "</p>");
+        free(bq.data);
+      } else {
+        emit_styles_open(out, es);
+        walk_children_with_whitespace(node, out, preserve_whitespace);
+        emit_styles_close(out, es);
+      }
       buffer_append_str(out, "</blockquote>");
       break;
     }

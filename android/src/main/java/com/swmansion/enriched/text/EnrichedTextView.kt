@@ -8,7 +8,6 @@ import android.graphics.text.LineBreaker
 import android.os.Build
 import android.text.Layout
 import android.text.Spannable
-import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextUtils
 import android.util.AttributeSet
@@ -29,7 +28,6 @@ import com.swmansion.enriched.common.GumboNormalizer
 import com.swmansion.enriched.common.parser.EnrichedParser
 import com.swmansion.enriched.text.spans.EnrichedTextImageSpan
 import com.swmansion.enriched.text.spans.interfaces.EnrichedTextClickableSpan
-import com.swmansion.enriched.text.spans.interfaces.EnrichedTextSpan
 import kotlin.math.ceil
 
 class EnrichedTextView : AppCompatTextView {
@@ -75,6 +73,7 @@ class EnrichedTextView : AppCompatTextView {
     }
 
     setPadding(0, 0, 0, 0)
+    includeFontPadding = false
     setFontSize(EnrichedConstants.TEXT_DEFAULT_FONT_SIZE)
   }
 
@@ -251,32 +250,8 @@ class EnrichedTextView : AppCompatTextView {
   fun setHtmlStyle(style: ReadableMap?) {
     if (style == null) return
 
-    val enrichedStyle = EnrichedTextStyle.fromReadableMap(context as ReactContext, fontSize.toInt(), style)
-    this.enrichedStyle = enrichedStyle
-
-    val currentText = text ?: return
-    if (currentText.isEmpty()) return
-
-    val spannable = SpannableString(currentText)
-    val spans = spannable.getSpans(0, spannable.length, EnrichedTextSpan::class.java)
-    var modified = false
-
-    for (span in spans) {
-      val start = spannable.getSpanStart(span)
-      val end = spannable.getSpanEnd(span)
-      val flags = spannable.getSpanFlags(span)
-
-      if (start == -1 || end == -1) continue
-
-      spannable.removeSpan(span)
-      val newSpan = span.rebuildWithStyle(enrichedStyle)
-      spannable.setSpan(newSpan, start, end, flags)
-      modified = true
-    }
-
-    if (modified) {
-      this.text = spannable
-    }
+    enrichedStyle = EnrichedTextStyle.fromReadableMap(context as ReactContext, style)
+    valueDirty = value != null
   }
 
   fun setColor(colorInt: Int?) {

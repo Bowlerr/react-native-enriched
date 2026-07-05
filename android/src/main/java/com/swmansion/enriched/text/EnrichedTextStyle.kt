@@ -61,7 +61,6 @@ data class EnrichedTextStyle(
   companion object {
     fun fromReadableMap(
       context: ReactContext,
-      fontSize: Int,
       map: ReadableMap,
     ): EnrichedTextStyle {
       val h1 = map.getMap("h1")
@@ -97,7 +96,7 @@ data class EnrichedTextStyle(
         blockquoteStripeWidth = parseFloat(blockquote, "borderWidth").toInt(),
         blockquoteGapWidth = parseFloat(blockquote, "gapWidth").toInt(),
         olGapWidth = parseFloat(orderedList, "gapWidth").toInt(),
-        olMarginLeft = calculateOlMarginLeft(fontSize, parseFloat(orderedList, "marginLeft").toInt()),
+        olMarginLeft = parseFloat(orderedList, "marginLeft").toInt(),
         olMarkerFontWeight = parseOptionalFontWeight(orderedList, "markerFontWeight"),
         olMarkerColor = parseOptionalColor(context, orderedList, "markerColor"),
         ulGapWidth = parseFloat(unorderedList, "gapWidth").toInt(),
@@ -165,14 +164,6 @@ data class EnrichedTextStyle(
     ): Int? {
       val weight = map?.getString(key) ?: return null
       return parseFontWeight(weight)
-    }
-
-    private fun calculateOlMarginLeft(
-      fontSize: Int,
-      userMargin: Int,
-    ): Int {
-      val leadMargin = fontSize / 2
-      return leadMargin + userMargin
     }
 
     private fun parseMentionsStyle(

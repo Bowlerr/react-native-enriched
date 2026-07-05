@@ -8,10 +8,18 @@ class EnrichedInputCheckboxListSpan(
   override var isChecked: Boolean,
   htmlStyle: HtmlStyle,
   level: Int = 0,
-) : EnrichedCheckboxListSpan(isChecked, htmlStyle, level),
+  markerStart: Int = -1,
+  enclosingBlockQuoteDepth: Int = 0,
+) : EnrichedCheckboxListSpan(
+    isChecked,
+    htmlStyle,
+    level,
+    markerStart,
+    enclosingBlockQuoteDepth,
+  ),
   EnrichedInputSpan {
   override val dependsOnHtmlStyle: Boolean = true
 
   override fun rebuildWithStyle(htmlStyle: HtmlStyle): EnrichedInputCheckboxListSpan =
-    EnrichedInputCheckboxListSpan(isChecked, htmlStyle, level)
+    EnrichedInputCheckboxListSpan(isChecked, htmlStyle, level, markerStart, enclosingBlockQuoteDepth)
 }

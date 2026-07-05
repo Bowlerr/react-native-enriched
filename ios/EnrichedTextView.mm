@@ -24,6 +24,169 @@ using namespace facebook::react;
 @interface EnrichedTextView () <NSObject>
 @end
 
+static BOOL EnrichedTextViewMarkerMatches(NSString *markerFormat,
+                                          NSString *baseValue) {
+  if (markerFormat == nullptr) {
+    return NO;
+  }
+
+  NSString *continuationBaseValue =
+      [baseValue stringByAppendingString:@"Continuation"];
+  return [markerFormat isEqualToString:baseValue] ||
+         [markerFormat hasPrefix:[baseValue stringByAppendingString:@":"]] ||
+         [markerFormat isEqualToString:continuationBaseValue] ||
+         [markerFormat
+             hasPrefix:[continuationBaseValue stringByAppendingString:@":"]];
+}
+
+static BOOL EnrichedTextViewParagraphHasMarker(NSParagraphStyle *pStyle,
+                                               NSString *baseValue) {
+  if (pStyle == nil) {
+    return NO;
+  }
+
+  for (NSTextList *textList in pStyle.textLists) {
+    if (EnrichedTextViewMarkerMatches(textList.markerFormat, baseValue)) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static BOOL EnrichedTextViewParagraphHasCodeBlock(NSParagraphStyle *pStyle) {
+  if (pStyle == nil) {
+    return NO;
+  }
+
+  for (NSTextList *textList in pStyle.textLists) {
+    if ([textList.markerFormat isEqualToString:@"EnrichedCodeBlock"]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static BOOL EnrichedTextViewIsTerminalIgnorableCharacter(unichar character) {
+  return character == 0x200B ||
+         [[NSCharacterSet newlineCharacterSet] characterIsMember:character];
+}
+
+static NSUInteger
+EnrichedTextViewLastVisibleContentIndex(NSString *text, NSRange visibleRange,
+                                        NSUInteger contentLength) {
+  NSUInteger visibleEnd = MIN(NSMaxRange(visibleRange), contentLength);
+  if (visibleRange.location >= visibleEnd || text.length == 0) {
+    return NSNotFound;
+  }
+
+  for (NSUInteger index = visibleEnd; index > visibleRange.location; index--) {
+    unichar character = [text characterAtIndex:index - 1];
+    if (!EnrichedTextViewIsTerminalIgnorableCharacter(character)) {
+      return index - 1;
+    }
+  }
+
+  return NSNotFound;
+}
+
+static CGFloat
+EnrichedTextViewTerminalVisualPadding(NSTextStorage *storage,
+                                      NSUInteger lastContentIndex) {
+  if (lastContentIndex == NSNotFound || lastContentIndex >= storage.length) {
+    return 0.0;
+  }
+
+  NSParagraphStyle *paragraphStyle =
+      [storage attribute:NSParagraphStyleAttributeName
+                 atIndex:lastContentIndex
+          effectiveRange:nil];
+  CGFloat padding = MAX(0.0, paragraphStyle.paragraphSpacing);
+
+  if (EnrichedTextViewParagraphHasCodeBlock(paragraphStyle)) {
+    padding = MAX(padding, 6.0);
+  }
+
+  if (EnrichedTextViewParagraphHasMarker(paragraphStyle,
+                                         @"EnrichedBlockQuote")) {
+    padding = MAX(padding, 12.0);
+  }
+
+  return padding;
+}
+
+static CGFloat EnrichedTextViewDecoratedMeasuredHeight(
+    NSTextStorage *storage, NSLayoutManager *layoutManager,
+    NSTextContainer *textContainer, CGRect usedRect,
+    NSUInteger originalContentLength) {
+  CGFloat measuredHeight = ceil(usedRect.size.height);
+  NSRange visibleGlyphRange =
+      [layoutManager glyphRangeForTextContainer:textContainer];
+  if (visibleGlyphRange.length == 0) {
+    return measuredHeight;
+  }
+
+  NSRange visibleCharRange =
+      [layoutManager characterRangeForGlyphRange:visibleGlyphRange
+                                actualGlyphRange:NULL];
+  NSUInteger lastContentIndex = EnrichedTextViewLastVisibleContentIndex(
+      storage.string, visibleCharRange, originalContentLength);
+  CGFloat terminalPadding =
+      EnrichedTextViewTerminalVisualPadding(storage, lastContentIndex);
+
+  __block CGFloat decoratedMaxY = CGRectGetMaxY(usedRect);
+  __block CGFloat terminalLineMaxY = 0.0;
+
+  [layoutManager
+      enumerateLineFragmentsForGlyphRange:visibleGlyphRange
+                               usingBlock:^(CGRect rect, CGRect lineUsedRect,
+                                            NSTextContainer *_Nonnull container,
+                                            NSRange lineGlyphRange,
+                                            BOOL *_Nonnull stop) {
+                                 if (lineGlyphRange.location >=
+                                     layoutManager.numberOfGlyphs) {
+                                   return;
+                                 }
+
+                                 NSUInteger charIndex = [layoutManager
+                                     characterIndexForGlyphAtIndex:
+                                         lineGlyphRange.location];
+                                 if (charIndex >= storage.length) {
+                                   return;
+                                 }
+
+                                 NSParagraphStyle *paragraphStyle =
+                                     [storage attribute:
+                                                  NSParagraphStyleAttributeName
+                                                atIndex:charIndex
+                                         effectiveRange:nil];
+                                 if (EnrichedTextViewParagraphHasCodeBlock(
+                                         paragraphStyle)) {
+                                   decoratedMaxY =
+                                       MAX(decoratedMaxY,
+                                           CGRectGetMaxY(lineUsedRect) + 6.0);
+                                 }
+
+                                 if (lastContentIndex != NSNotFound) {
+                                   NSRange lineCharRange = [layoutManager
+                                       characterRangeForGlyphRange:
+                                           lineGlyphRange
+                                                  actualGlyphRange:NULL];
+                                   if (NSLocationInRange(lastContentIndex,
+                                                         lineCharRange)) {
+                                     terminalLineMaxY =
+                                         MAX(CGRectGetMaxY(rect),
+                                             CGRectGetMaxY(lineUsedRect));
+                                   }
+                                 }
+                               }];
+
+  if (terminalPadding > 0.0 && terminalLineMaxY > 0.0) {
+    decoratedMaxY = MAX(decoratedMaxY, terminalLineMaxY + terminalPadding);
+  }
+
+  return ceil(MAX(measuredHeight, decoratedMaxY));
+}
+
 @implementation EnrichedTextView {
   EnrichedTextViewShadowNode::ConcreteState::Shared _state;
   NSMutableDictionary<NSString *, UIImageView *> *_attachmentViews;
@@ -631,6 +794,7 @@ Class<RCTComponentViewProtocol> EnrichedTextViewCls(void) {
 
   NSMutableAttributedString *currentStr = [[NSMutableAttributedString alloc]
       initWithAttributedString:textView.textStorage];
+  NSUInteger originalContentLength = currentStr.length;
 
   // edge case: input with only a zero width space should still be of a height
   // of a single line, so we add a mock "I" character
@@ -674,7 +838,9 @@ Class<RCTComponentViewProtocol> EnrichedTextViewCls(void) {
 
   CGRect usedRect =
       [measurementLayoutManager usedRectForTextContainer:measurementContainer];
-  CGFloat measuredHeight = ceil(usedRect.size.height);
+  CGFloat measuredHeight = EnrichedTextViewDecoratedMeasuredHeight(
+      measurementStorage, measurementLayoutManager, measurementContainer,
+      usedRect, originalContentLength);
 
   return CGSizeMake(maxWidth, measuredHeight);
 }

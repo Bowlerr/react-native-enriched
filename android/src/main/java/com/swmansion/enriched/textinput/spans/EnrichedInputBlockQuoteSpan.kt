@@ -6,9 +6,10 @@ import com.swmansion.enriched.textinput.styles.HtmlStyle
 
 class EnrichedInputBlockQuoteSpan(
   htmlStyle: HtmlStyle,
-) : EnrichedBlockQuoteSpan(htmlStyle),
+  quoteDepth: Int = 0,
+) : EnrichedBlockQuoteSpan(htmlStyle, quoteDepth),
   EnrichedInputSpan {
   override val dependsOnHtmlStyle: Boolean = true
 
-  override fun rebuildWithStyle(htmlStyle: HtmlStyle): EnrichedInputBlockQuoteSpan = EnrichedInputBlockQuoteSpan(htmlStyle)
+  override fun rebuildWithStyle(htmlStyle: HtmlStyle): EnrichedInputBlockQuoteSpan = EnrichedInputBlockQuoteSpan(htmlStyle, quoteDepth)
 }

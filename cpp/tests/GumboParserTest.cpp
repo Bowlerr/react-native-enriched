@@ -20,6 +20,40 @@ TEST(GumboParserTest, GoogleDocsWrapper) {
             "");
 }
 
+TEST(GumboParserTest, KeepsSpacesAroundAdjacentInlineRuns) {
+  EXPECT_EQ(
+      GumboParser::normalizeHtml(
+          "<p>Inline code adjacency:\n"
+          "  <code>first code</code>\n"
+          "  normal text\n"
+          "  <code>second code</code>\n"
+          "  <a href=\"https://example.com\"><code>linked "
+          "code</code></a>\n"
+          "  trailing text.</p>"),
+      "<p>Inline code adjacency: <code>first code</code> normal text "
+      "<code>second code</code> <a href=\"https://example.com\"><code>linked "
+      "code</code></a> trailing text.</p>");
+}
+
+TEST(GumboParserTest, KeepsPunctuationAfterMention) {
+  EXPECT_EQ(
+      GumboParser::normalizeHtml(
+          "<blockquote>\n"
+          "  Quote inside ordered list item with\n"
+          "  <mention text=\"@Ordered Quote\" indicator=\"@\" "
+          "id=\"ordered-quote\" type=\"user\">@Ordered Quote</mention>\n"
+          "  and\n"
+          "  <mention text=\"#ordered-quote\" indicator=\"#\" "
+          "id=\"ordered-quote-channel\" "
+          "type=\"channel\">#ordered-quote</mention>.\n"
+          "</blockquote>"),
+      "<blockquote><p>Quote inside ordered list item with <mention "
+      "id=\"ordered-quote\" text=\"@Ordered Quote\" indicator=\"@\">@Ordered "
+      "Quote</mention> and <mention id=\"ordered-quote-channel\" "
+      "text=\"#ordered-quote\" indicator=\"#\">#ordered-quote</mention>.</p>"
+      "</blockquote>");
+}
+
 TEST(GumboParserTest, TagOmissions) {
   EXPECT_EQ(
       GumboParser::normalizeHtml("<meta name='author' content='John Doe'>"),
@@ -273,6 +307,21 @@ TEST(GumboParserTest, EnrichedTagRemappings) {
   EXPECT_EQ(GumboParser::normalizeHtml("<h4>x</h4>"), "<h4>x</h4>");
   EXPECT_EQ(GumboParser::normalizeHtml("<h5>x</h5>"), "<h5>x</h5>");
   EXPECT_EQ(GumboParser::normalizeHtml("<h6>x</h6>"), "<h6>x</h6>");
+  EXPECT_EQ(
+      GumboParser::normalizeHtml("<h1><strong>Bold Heading</strong></h1>\n\n"
+                                 "<h1><em>Italic Heading</em></h1>\n\n"
+                                 "<h1><u>Underline Heading</u></h1>\n\n"
+                                 "<h1><s>Strikethrough Heading</s></h1>\n\n"
+                                 "<h1>\n"
+                                 "  <a href=\"https://example.com\">\n"
+                                 "    Linked Heading\n"
+                                 "  </a>\n"
+                                 "</h1>\n\n"
+                                 "<h1><code>Code Heading</code></h1>"),
+      "<h1><b>Bold Heading</b></h1><h1><i>Italic Heading</i></h1>"
+      "<h1><u>Underline Heading</u></h1><h1><s>Strikethrough Heading</s></h1>"
+      "<h1><a href=\"https://example.com\">Linked Heading</a> </h1>"
+      "<h1><code>Code Heading</code></h1>");
 
   // Alignment style attributes
   EXPECT_EQ(GumboParser::normalizeHtml("<p style=\"text-align: center\">x</p>"),
@@ -521,6 +570,81 @@ TEST(GumboParserTest, NestedBlockquotesPreserveBlockContent) {
                 "Item</li></ul></blockquote>"),
             "<blockquote><codeblock><p>Code block inside quote\nLine 2</p></"
             "codeblock><ul><li>Item</li></ul></blockquote>");
+  EXPECT_EQ(GumboParser::normalizeHtml(
+                "<blockquote><p>Quote image below:</p><img src=\"x\" "
+                "width=\"64\" height=\"64\" /></blockquote><ul><li>Root</li>"
+                "</ul>"),
+            "<blockquote><p>Quote image below:</p><p><img src=\"x\" "
+            "width=\"64\" height=\"64\" /></p></blockquote><ul><li>Root</li>"
+            "</ul>");
+}
+
+TEST(GumboParserTest, NestedMarkerOrderingStructureIsPreserved) {
+  EXPECT_EQ(
+      GumboParser::normalizeHtml(
+          "<blockquote><p>Outer quote</p><ol><li>Ordered item<blockquote><p>"
+          "Quote inside ordered item</p></blockquote></li><li>Ordered item "
+          "with "
+          "unordered child<ul><li>Unordered child<blockquote><p>Quote inside "
+          "unordered child</p></blockquote></li></ul></li></ol><ul><li>Bullet "
+          "item<blockquote><p>Quote inside bullet item</p></blockquote></li></"
+          "ul></blockquote>"),
+      "<blockquote><p>Outer quote</p><ol><li>Ordered item<blockquote><p>Quote "
+      "inside ordered item</p></blockquote></li><li>Ordered item with "
+      "unordered "
+      "child<ul><li>Unordered child<blockquote><p>Quote inside unordered "
+      "child</"
+      "p></blockquote></li></ul></li></ol><ul><li>Bullet item<blockquote><p>"
+      "Quote inside bullet item</p></blockquote></li></ul></blockquote>");
+
+  EXPECT_EQ(
+      GumboParser::normalizeHtml(
+          "<ul><li>List item with checkbox children<ul "
+          "data-type='checkbox'><li "
+          "checked>Checked checkbox<ol><li>Ordered child</li><li>Ordered child "
+          "with quote<blockquote><p>Quote inside ordered child</p></blockquote>"
+          "</li></ol></li><li>Unchecked checkbox<ul><li>Unordered "
+          "child</li><li>"
+          "Unordered child with quote<blockquote><p>Quote inside unordered "
+          "child</p></blockquote></li></ul></li></ul></li></ul>"),
+      "<ul><li>List item with checkbox children<ul data-type=\"checkbox\"><li "
+      "checked>Checked checkbox<ol><li>Ordered child</li><li>Ordered child "
+      "with "
+      "quote<blockquote><p>Quote inside ordered child</p></blockquote></li></"
+      "ol></li><li>Unchecked checkbox<ul><li>Unordered child</li><li>Unordered "
+      "child with quote<blockquote><p>Quote inside unordered child</p></"
+      "blockquote></li></ul></li></ul></li></ul>");
+
+  EXPECT_EQ(
+      GumboParser::normalizeHtml(
+          "<ul><li><blockquote><p>Quote first in bullet</p></blockquote></li></"
+          "ul><ol><li><blockquote><p>Quote first in number</p></blockquote></"
+          "li></ol><ul data-type='checkbox'><li checked><blockquote><p>Quote "
+          "first in checked checkbox</p></blockquote></li><li><blockquote><p>"
+          "Quote first in unchecked checkbox</p></blockquote></li></ul>"),
+      "<ul><li><blockquote><p>Quote first in bullet</p></blockquote></li></"
+      "ul><ol><li><blockquote><p>Quote first in number</p></blockquote></li></"
+      "ol><ul data-type=\"checkbox\"><li checked><blockquote><p>Quote first in "
+      "checked checkbox</p></blockquote></li><li><blockquote><p>Quote first in "
+      "unchecked checkbox</p></blockquote></li></ul>");
+
+  EXPECT_EQ(
+      GumboParser::normalizeHtml(
+          "<blockquote><ul data-type='checkbox'><li checked><blockquote><p>"
+          "Quote first in checked checkbox inside "
+          "quote</p></blockquote></li><li>"
+          "<blockquote><p>Quote first in unchecked checkbox inside quote</p></"
+          "blockquote></li></ul><ul><li><blockquote><p>Quote first in bullet "
+          "inside quote</p></blockquote></li></ul><ol><li><blockquote><p>Quote "
+          "first in number inside "
+          "quote</p></blockquote></li></ol></blockquote>"),
+      "<blockquote><ul data-type=\"checkbox\"><li checked><blockquote><p>Quote "
+      "first in checked checkbox inside quote</p></blockquote></li><li><"
+      "blockquote><p>Quote first in unchecked checkbox inside quote</p></"
+      "blockquote></li></ul><ul><li><blockquote><p>Quote first in bullet "
+      "inside "
+      "quote</p></blockquote></li></ul><ol><li><blockquote><p>Quote first in "
+      "number inside quote</p></blockquote></li></ol></blockquote>");
 }
 
 TEST(GumboParserTest, BrRemappings) {
