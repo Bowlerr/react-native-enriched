@@ -296,6 +296,64 @@ line 2</code></pre>
 `,
   },
   {
+    key: 'newline-heavy',
+    title: 'Newline Heavy',
+    html: `
+<p>Paragraph line one<br>Paragraph line two with <strong>bold</strong><br>Paragraph line three with <code>inline code</code> and <a href="https://example.com">a link</a>.</p>
+
+<p>Paragraph before double break<br><br>Paragraph after one blank rendered line<br><br><br>Paragraph after two blank rendered lines.</p>
+
+<p>Raw source newline one
+raw source newline two should stay in the same paragraph after HTML normalization.</p>
+
+<h2>Heading line one<br>Heading line two<br><br><code>Heading code after blank line</code></h2>
+
+<blockquote>
+  <p>Quote line one<br>Quote line two with <em>italic</em><br>Quote line three with <code>inline code</code>.</p>
+  <p>Quote before double break<br><br>Quote after blank rendered line.</p>
+  <blockquote>
+    <p>Nested quote line one<br>Nested quote line two</p>
+  </blockquote>
+</blockquote>
+
+<ul>
+  <li>Bullet line one<br>Bullet line two with <strong>bold</strong><br>Bullet line three before nested children
+    <ul>
+      <li>Nested bullet line one<br><br>Nested bullet after blank rendered line</li>
+    </ul>
+  </li>
+  <li>Second bullet after multiline item</li>
+</ul>
+
+<ol>
+  <li>Ordered line one<br><br>Ordered line after blank rendered line with <em>italic</em></li>
+  <li>Ordered parent before multiline checkbox children
+    <ul data-type="checkbox">
+      <li checked>Checked child line one<br>Checked child line two</li>
+      <li>Unchecked child line one<br><br>Unchecked child after blank rendered line with <code>code</code></li>
+    </ul>
+  </li>
+</ol>
+
+<ul data-type="checkbox">
+  <li checked>Checked root line one<br><br>Checked root after blank rendered line with <u>underline</u></li>
+  <li>Unchecked root line one<br>Unchecked root line two before quote
+    <blockquote>
+      <p>Quote inside multiline checkbox line one<br><br>Quote inside checkbox after blank rendered line</p>
+    </blockquote>
+  </li>
+</ul>
+
+<pre><code>Code block line one
+
+Code block line two
+Code block line three after literal blank line
+
+
+Code block line six after two literal blank lines</code></pre>
+`,
+  },
+  {
     key: 'nested-block-matrix',
     title: 'Nested Block Matrix',
     html: `

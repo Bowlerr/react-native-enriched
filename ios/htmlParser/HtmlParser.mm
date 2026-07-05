@@ -883,10 +883,6 @@ static NSRange EnrichedHtmlRangeByTrimmingBoundaryWhitespace(NSString *text,
                                                      withString:@""];
 
     // tags that have to be in separate lines
-    fixedHtml = [self stringByAddingNewlinesToTag:@"<br>"
-                                         inString:fixedHtml
-                                          leading:YES
-                                         trailing:YES];
     fixedHtml = [self stringByAddingNewlinesToTag:@"<ul>"
                                          inString:fixedHtml
                                           leading:YES
@@ -1036,12 +1032,6 @@ static NSRange EnrichedHtmlRangeByTrimmingBoundaryWhitespace(NSString *text,
     fixedHtml = [fixedHtml
         stringByReplacingOccurrencesOfString:@"<li></li>\n</ol>"
                                   withString:@"<li>\u200B</li>\n</ol>"];
-
-    // replace "<br>" at the end with "<br>\n" if input is not empty to properly
-    // handle last <br> in html
-    if ([fixedHtml hasSuffix:@"<br>"] && fixedHtml.length != 4) {
-      fixedHtml = [fixedHtml stringByAppendingString:@"\n"];
-    }
   }
 
   return fixedHtml;
@@ -1107,7 +1097,7 @@ static NSRange EnrichedHtmlRangeByTrimmingBoundaryWhitespace(NSString *text,
       }
 
       if ([currentTagName isEqualToString:@"br"]) {
-        // do nothing, we don't include these tags in styles
+        [plainText appendString:@"\n"];
       } else if (!closingTag) {
         BOOL isPlainParagraph = [currentTagName isEqualToString:@"p"] &&
                                 currentTagParams.length == 0;
